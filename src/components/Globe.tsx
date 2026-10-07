@@ -64,6 +64,7 @@ export function Globe({ axis, origin, antipode, locked, className }: Props) {
     u: null as Vec3 | null,
     lastT: 0,
     dirty: true,
+    requestDraw: () => {},
   });
 
   useEffect(() => {
@@ -73,11 +74,13 @@ export function Globe({ axis, origin, antipode, locked, className }: Props) {
       s.toAxis = axis;
       s.transitionStart = performance.now();
       s.dirty = true;
+      s.requestDraw();
     }
   }, [axis]);
 
   useEffect(() => {
     state.current.dirty = true;
+    state.current.requestDraw();
   }, [origin, antipode, locked]);
 
   useEffect(() => {
@@ -87,6 +90,11 @@ export function Globe({ axis, origin, antipode, locked, className }: Props) {
     let raf = 0;
     let cssSize = 0;
 
+    const requestDraw = () => {
+      if (reduced && raf === 0) raf = requestAnimationFrame(draw);
+    };
+    state.current.requestDraw = requestDraw;
+
     const resize = () => {
       const rect = canvas.getBoundingClientRect();
       const dpr = Math.min(2, window.devicePixelRatio || 1);
@@ -95,6 +103,9 @@ export function Globe({ axis, origin, antipode, locked, className }: Props) {
       canvas.height = Math.round(rect.height * dpr);
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       state.current.dirty = true;
+      // Under reduced motion the loop stops between changes — schedule a
+      // single redraw so a resize doesn't leave a blank canvas.
+      requestDraw();
     };
     resize();
     const ro = new ResizeObserver(resize);
@@ -287,6 +298,8 @@ export function Globe({ axis, origin, antipode, locked, className }: Props) {
       if (reduced) s.dirty = false;
       if (!reduced || s.dirty || k < 1) {
         raf = requestAnimationFrame(draw);
+      } else {
+        raf = 0;
       }
     };
 

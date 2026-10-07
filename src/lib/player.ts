@@ -70,7 +70,9 @@ export class Player {
         if (HlsCtor.isSupported()) {
           this.hls = new HlsCtor({ maxBufferLength: 20 });
           this.hls.on(HlsCtor.Events.ERROR, (_e, data) => {
-            if (data.fatal && token === this.attempt) this.set("error");
+            // No token check: the same instance can outlive pause()/resume()
+            // bumps. live gates delivery; halt() destroys stale instances.
+            if (data.fatal && this.live) this.set("error");
           });
           this.hls.loadSource(url);
           this.hls.attachMedia(this.audio);
@@ -91,16 +93,22 @@ export class Player {
   }
 
   pause() {
+    // Bump attempt so a pending play()/resume() rejection can't report
+    // after the user has paused.
+    this.attempt++;
     this.live = false;
     this.audio.pause();
     this.set("idle");
   }
 
   resume() {
+    const token = ++this.attempt;
     this.live = true;
     this.set("connecting");
     this.armStall();
-    this.audio.play().catch((e) => this.set(this.fail(e)));
+    this.audio.play().catch((e) => {
+      if (token === this.attempt && this.live) this.set(this.fail(e));
+    });
   }
 
   private halt() {

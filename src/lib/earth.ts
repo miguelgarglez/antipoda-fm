@@ -117,7 +117,11 @@ function ringContains(r: PrepRing, qlon: number, qlat: number): boolean {
   let inside = false;
   const { x, y } = r;
   for (let i = 0, j = x.length - 1; i < x.length; j = i++) {
-    if (y[i] > qlat !== y[j] > qlat && qlon < ((x[j] - x[i]) * (qlat - y[i])) / (y[j] - y[i]) + x[i]) {
+    // The closing edge (last vertex -> first) must stay continuous in
+    // unwrapped space: a dateline-spanning ring ends e.g. at +180 while
+    // x[0] is -180, which would otherwise draw a phantom 360-degree edge.
+    const xi = i === 0 ? x[0] + 360 * Math.round((x[x.length - 1] - x[0]) / 360) : x[i];
+    if (y[i] > qlat !== y[j] > qlat && qlon < ((x[j] - xi) * (qlat - y[i])) / (y[j] - y[i]) + xi) {
       inside = !inside;
     }
   }
@@ -131,9 +135,11 @@ function rep(lon: number, r: PrepRing): number {
 }
 
 export function countryAt(p: GeoPoint): Country | null {
-  // The 110m coastline is truncated at ~85.6°S; everything south of it is
-  // Antarctica in this dataset. (The North Pole really is open ocean.)
-  if (p.lat <= -85.7) {
+  // The 110m coastline truncates the Antarctic interior around 85°S — its
+  // ring's artificial southern edge sits at ~84.7°S. South of 85°S nothing
+  // in this dataset is open water, so contain the polar cap explicitly.
+  // (The North Pole really is open ocean.)
+  if (p.lat <= -85.0) {
     return countries.find((c) => c.name === "Antarctica") ?? null;
   }
   for (const { country, polys } of prepared) {

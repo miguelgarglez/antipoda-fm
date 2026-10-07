@@ -109,6 +109,9 @@ export default function App() {
     } else if (s === "error") {
       setConnecting(false);
       setPlaying(false);
+      // The stream just died — mark the ref stale synchronously so an
+      // exhausted dial fails instead of pretending it still plays.
+      playingRef.current = false;
       nextCandidateRef.current("signal lost — trying the next frequency");
     } else {
       setPlaying(false);
@@ -124,6 +127,7 @@ export default function App() {
   const startTune = useCallback(
     async (origin: GeoPoint) => {
       const id = ++runId.current;
+      searchSeq.current++; // cancel any in-flight place search
       player.current?.stop();
       candidatesRef.current = [];
       setPhase("tuning");
@@ -171,14 +175,18 @@ export default function App() {
       setGeoDenied(true);
       return;
     }
+    const id = ++runId.current;
+    searchSeq.current++;
     setPhase("tuning");
     setLog([]);
     pushLog("acquiring position…");
     navigator.geolocation.getCurrentPosition(
       (pos) => {
+        if (id !== runId.current) return; // cancelled or superseded
         startTune({ lat: pos.coords.latitude, lon: pos.coords.longitude });
       },
       () => {
+        if (id !== runId.current) return;
         setPhase("idle");
         setGeoDenied(true);
       },
@@ -192,6 +200,7 @@ export default function App() {
       setPlaces([]);
       setQuery("");
       setSearchNote(null);
+      setSearching(false);
       startTune({ lat: p.lat, lon: p.lon, label: describePlace(p) });
     },
     [startTune],
@@ -217,13 +226,15 @@ export default function App() {
   );
 
   // Debounced place search; results from superseded queries are dropped.
+  // Every run bumps the sequence — including clears — so a late reply can
+  // never repopulate a stale field.
   useEffect(() => {
+    const seq = ++searchSeq.current;
     if (query.trim().length < 2) {
       setPlaces([]);
       setSearchNote(null);
       return;
     }
-    const seq = ++searchSeq.current;
     const q = query.trim();
     const t = setTimeout(async () => {
       setSearching(true);
@@ -334,7 +345,11 @@ export default function App() {
 
   const liveMsg =
     phase === "tuned" && station
-      ? `Now playing ${station.name}, ${station.country || "far side"}`
+      ? playing
+        ? `Now playing ${station.name}, ${station.country || "far side"}`
+        : connecting
+          ? `Connecting to ${station.name}`
+          : `Paused — ${station.name}`
       : phase === "failed"
         ? "The other side is quiet."
         : phase === "tuning"
@@ -378,8 +393,8 @@ export default function App() {
               </h1>
               <p className="lede">
                 Every radio app finds the station nearest you. This one points
-                straight down, through the Earth, to the station broadcasting at
-                your antipode, the most distant live sound on the planet.
+                straight down, through the Earth, to the station broadcasting
+                nearest your antipode, as far as live sound gets.
               </p>
               <div className="actions">
                 <button className="btn primary" onClick={locateAndTune}>
@@ -469,13 +484,13 @@ export default function App() {
               </p>
               {stationKm !== null ? (
                 <p className="distance">
-                  ≈{formatKm(stationKm)} away
+                  ≈{formatKm(stationKm)} away over the surface
                   {nearPoint && " — through the planet"}
                 </p>
               ) : (
                 <p className="distance">
-                  antipode {formatKm(haversineKm(tune.origin, tune.antipode))} away
-                  {" · station position unmapped"}
+                  antipode {formatKm(haversineKm(tune.origin, tune.antipode))}{" "}
+                  away over the surface · station position unmapped
                 </p>
               )}
               {tune.land.oceanKm !== null ? (
