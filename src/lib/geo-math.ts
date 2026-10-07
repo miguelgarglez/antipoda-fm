@@ -82,6 +82,13 @@ export function rotateAroundAxis(v: Vec3, axis: Vec3, angle: number): Vec3 {
 /** Spherical interpolation between two unit vectors. */
 export function slerp(a: Vec3, b: Vec3, t: number): Vec3 {
   const d = clamp(dot(a, b), -1, 1);
+  // Antiparallel vectors have no unique great-circle path — detour through
+  // an arbitrary perpendicular so the midpoint can't collapse to zero.
+  if (d < -0.9995) {
+    const ref: Vec3 = Math.abs(a[2]) < 0.9 ? [0, 0, 1] : [1, 0, 0];
+    const perp = norm(cross(a, ref));
+    return t < 0.5 ? slerp(a, perp, t * 2) : slerp(perp, b, t * 2 - 1);
+  }
   const angle = Math.acos(d);
   if (angle < 1e-6) return b;
   const s = Math.sin(angle);

@@ -2,6 +2,7 @@
   --ink: #0a0b10;
   --bone: #f2eee3;
   --slate: #5a6478;
+  --slate-2: #98a1b8;
   --signal: #ff4d00;
   --phosphor: #7cffb2;
   --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
@@ -55,7 +56,7 @@ body {
 .top-sub {
   font-family: var(--mono);
   font-size: 11px;
-  color: var(--slate);
+  color: var(--slate-2);
   letter-spacing: 0.04em;
 }
 
@@ -176,7 +177,7 @@ main {
 
 .btn.ghost {
   border-color: transparent;
-  color: var(--slate);
+  color: var(--slate-2);
 }
 
 .btn.ghost:hover {
@@ -185,7 +186,7 @@ main {
 
 button:focus-visible,
 input:focus-visible {
-  outline: 2px solid rgba(124, 255, 178, 0.75);
+  outline: 2px solid var(--phosphor);
   outline-offset: 3px;
   border-radius: 2px;
 }
@@ -210,7 +211,7 @@ input:focus-visible {
 }
 
 .search input::placeholder {
-  color: var(--slate);
+  color: var(--slate-2);
 }
 
 .search input:focus {
@@ -263,7 +264,7 @@ input:focus-visible {
   font-family: var(--mono);
   font-size: 11px;
   letter-spacing: 0.08em;
-  color: var(--slate);
+  color: var(--slate-2);
   background: transparent;
   border: 1px solid rgba(90, 100, 120, 0.4);
   border-radius: 999px;
@@ -287,14 +288,12 @@ input:focus-visible {
 .note {
   font-family: var(--mono);
   font-size: 11.5px;
-  color: var(--slate);
+  color: var(--slate-2);
   line-height: 1.6;
   margin: 10px 0 0;
 }
 
-.note.dim {
-  opacity: 0.7;
-}
+
 
 .tuning .log {
   list-style: none;
@@ -302,7 +301,7 @@ input:focus-visible {
   padding: 0;
   font-family: var(--mono);
   font-size: 13px;
-  color: var(--slate);
+  color: var(--slate-2);
 }
 
 .tuning .log li {
@@ -364,7 +363,7 @@ input:focus-visible {
   font-family: var(--mono);
   font-size: 11px;
   letter-spacing: 0.28em;
-  color: var(--slate);
+  color: var(--slate-2);
   display: flex;
   align-items: center;
   gap: 9px;
@@ -437,7 +436,7 @@ input:focus-visible {
   font-family: var(--mono);
   font-size: 10px;
   letter-spacing: 0.06em;
-  color: var(--slate);
+  color: var(--slate-2);
 }
 
 .visually-hidden {

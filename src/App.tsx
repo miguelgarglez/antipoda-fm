@@ -12,7 +12,7 @@ import {
 } from "./lib/geo-math";
 import { resolveSignals, stationDistanceKm, Station, TuneResult } from "./lib/radio";
 import { searchPlaces, describePlace, Place } from "./lib/geocode";
-import { Player } from "./lib/player";
+import { Player, PlayerState } from "./lib/player";
 
 type Phase = "idle" | "tuning" | "tuned" | "failed";
 
@@ -33,15 +33,23 @@ export default function App() {
   const [query, setQuery] = useState("");
   const [places, setPlaces] = useState<Place[]>([]);
   const [searching, setSearching] = useState(false);
-  const searchBox = useRef<HTMLDivElement>(null);
+  const [searchNote, setSearchNote] = useState<string | null>(null);
+  const [lastSignalNote, setLastSignalNote] = useState(false);
 
   const player = useRef<Player | null>(null);
   const candidatesRef = useRef<Station[]>([]);
   const stationIxRef = useRef(0);
+  const playingRef = useRef(false);
   const phaseRef = useRef<Phase>("idle");
   const runId = useRef(0);
+  const searchSeq = useRef(0);
+
+  const placeInputRef = useRef<HTMLInputElement>(null);
+  const playBtnRef = useRef<HTMLButtonElement>(null);
+  const failBtnRef = useRef<HTMLButtonElement>(null);
 
   phaseRef.current = phase;
+  playingRef.current = playing;
 
   const pushLog = (line: string) => setLog((l) => [...l, line]);
 
@@ -54,7 +62,8 @@ export default function App() {
     }
     stationIxRef.current = ix;
     setStationIx(ix);
-    player.current?.play(c.urlResolved);
+    setLastSignalNote(false);
+    player.current?.play(c.urlResolved, c.hls === 1);
   }, []);
 
   const nextCandidate = useCallback(
@@ -62,8 +71,16 @@ export default function App() {
       if (phaseRef.current !== "tuning" && phaseRef.current !== "tuned") return;
       const next = stationIxRef.current + 1;
       if (next >= candidatesRef.current.length) {
-        setPhase("failed");
-        setFailMsg("Every signal near your antipode is asleep right now.");
+        if (playingRef.current) {
+          // The last station is still alive — keep it rather than
+          // killing a working stream for an empty dial.
+          pushLog("that was the last signal on the dial");
+          setLastSignalNote(true);
+        } else {
+          player.current?.stop();
+          setPhase("failed");
+          setFailMsg("Every signal near your antipode is asleep right now.");
+        }
         return;
       }
       if (note) pushLog(note);
@@ -75,7 +92,7 @@ export default function App() {
   const nextCandidateRef = useRef(nextCandidate);
   nextCandidateRef.current = nextCandidate;
 
-  const onPlayerState = useCallback((s: "idle" | "connecting" | "playing" | "error") => {
+  const onPlayerState = useCallback((s: PlayerState) => {
     if (s === "playing") {
       setPlaying(true);
       setConnecting(false);
@@ -83,8 +100,15 @@ export default function App() {
     } else if (s === "connecting") {
       setConnecting(true);
       setPlaying(false);
+    } else if (s === "blocked") {
+      // Autoplay was denied (e.g. arriving from a shared link). The station
+      // is fine — present the card paused and let the user press Listen.
+      setPlaying(false);
+      setConnecting(false);
+      if (phaseRef.current !== "tuned") setPhase("tuned");
     } else if (s === "error") {
       setConnecting(false);
+      setPlaying(false);
       nextCandidateRef.current("signal lost — trying the next frequency");
     } else {
       setPlaying(false);
@@ -100,27 +124,30 @@ export default function App() {
   const startTune = useCallback(
     async (origin: GeoPoint) => {
       const id = ++runId.current;
+      player.current?.stop();
+      candidatesRef.current = [];
       setPhase("tuning");
       setLog([]);
       setTune(null);
       setPlaying(false);
+      setConnecting(false);
       setCopied(false);
+      setLastSignalNote(false);
       const anti = antipodeOf(origin);
-
-      const result: TuneResult = {
-        origin,
-        antipode: anti,
-        candidates: [],
-        land: { country: { id: "", name: "", iso2: null, polygons: [] }, oceanKm: null, nearPoint: null },
-        signalKm: null,
-      };
-      setTune({ ...result });
       pushLog("piercing the planet…");
 
-      const [res] = await Promise.all([
-        resolveSignals(origin, anti),
-        new Promise((r) => setTimeout(r, 1500)),
-      ]);
+      let res: TuneResult;
+      try {
+        [res] = await Promise.all([
+          resolveSignals(origin, anti),
+          new Promise((r) => setTimeout(r, 1500)),
+        ]);
+      } catch {
+        if (id !== runId.current) return;
+        setPhase("failed");
+        setFailMsg("Couldn't reach the dial — check your connection and try again.");
+        return;
+      }
       if (id !== runId.current) return;
 
       pushLog("asking the far side for its stations…");
@@ -161,68 +188,114 @@ export default function App() {
 
   const pickPlace = useCallback(
     (p: Place) => {
+      searchSeq.current++;
       setPlaces([]);
       setQuery("");
+      setSearchNote(null);
       startTune({ lat: p.lat, lon: p.lon, label: describePlace(p) });
     },
     [startTune],
   );
 
-  const quickPlace = useCallback(async (name: string) => {
-    setSearching(true);
-    try {
-      const res = await searchPlaces(name);
-      if (res[0]) pickPlace(res[0]);
-    } finally {
-      setSearching(false);
-    }
-  }, [pickPlace]);
+  const quickPlace = useCallback(
+    async (name: string) => {
+      const seq = ++searchSeq.current;
+      setSearching(true);
+      setSearchNote(null);
+      try {
+        const res = await searchPlaces(name);
+        if (seq !== searchSeq.current) return;
+        if (res[0]) pickPlace(res[0]);
+        else setSearchNote("nothing on the map by that name");
+      } catch {
+        if (seq === searchSeq.current) setSearchNote("place search failed — try again");
+      } finally {
+        if (seq === searchSeq.current) setSearching(false);
+      }
+    },
+    [pickPlace],
+  );
 
-  // Debounced place search.
+  // Debounced place search; results from superseded queries are dropped.
   useEffect(() => {
     if (query.trim().length < 2) {
       setPlaces([]);
+      setSearchNote(null);
       return;
     }
+    const seq = ++searchSeq.current;
+    const q = query.trim();
     const t = setTimeout(async () => {
       setSearching(true);
       try {
-        setPlaces(await searchPlaces(query.trim()));
+        const res = await searchPlaces(q);
+        if (seq !== searchSeq.current) return;
+        setPlaces(res);
+        setSearchNote(res.length === 0 ? "nothing on the map by that name" : null);
       } catch {
-        setPlaces([]);
+        if (seq === searchSeq.current) {
+          setPlaces([]);
+          setSearchNote("place search failed — try again");
+        }
       } finally {
-        setSearching(false);
+        if (seq === searchSeq.current) setSearching(false);
       }
     }, 250);
     return () => clearTimeout(t);
   }, [query]);
 
-  // Restore a shared tune from the URL.
+  // Restore a shared tune from the URL. Strict: both params present,
+  // full-number parse, in range.
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
-    const lat = parseFloat(params.get("lat") ?? "");
-    const lon = parseFloat(params.get("lon") ?? "");
-    if (Number.isFinite(lat) && Number.isFinite(lon)) {
-      startTune({ lat, lon, label: params.get("from") ?? undefined });
-    }
+    const latRaw = params.get("lat");
+    const lonRaw = params.get("lon");
+    if (latRaw === null || lonRaw === null) return;
+    const parse = (s: string) => (/^-?\d+(\.\d+)?$/.test(s.trim()) ? Number(s) : NaN);
+    const lat = parse(latRaw);
+    const lon = parse(lonRaw);
+    if (Math.abs(lat) > 90 || Math.abs(lon) > 180 || !Number.isFinite(lat + lon)) return;
+    startTune({ lat, lon, label: params.get("from") ?? undefined });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Reflect the tuned state in the URL for sharing.
+  // Reflect the tuned state in the URL for sharing. Coordinates are coarsened
+  // to two decimals (~1 km) — the link still reproduces the same tune.
   useEffect(() => {
     if (phase === "tuned" && tune) {
       const u = new URL(window.location.href);
-      u.searchParams.set("lat", tune.origin.lat.toFixed(4));
-      u.searchParams.set("lon", tune.origin.lon.toFixed(4));
+      u.searchParams.set("lat", tune.origin.lat.toFixed(2));
+      u.searchParams.set("lon", tune.origin.lon.toFixed(2));
       if (tune.origin.label) u.searchParams.set("from", tune.origin.label);
       window.history.replaceState(null, "", u.toString());
     }
   }, [phase, tune]);
 
+  // Move focus into the arriving panel when the previous control vanished.
+  useEffect(() => {
+    const dead =
+      document.activeElement === null ||
+      document.activeElement === document.body ||
+      !document.contains(document.activeElement);
+    if (!dead) return;
+    if (phase === "tuned") playBtnRef.current?.focus();
+    else if (phase === "failed") failBtnRef.current?.focus();
+    else if (phase === "idle") placeInputRef.current?.focus();
+  }, [phase]);
+
   const axis: Vec3 = useMemo(() => {
     if (tune) return latLonToVec3(tune.origin.lat, tune.origin.lon);
     return POLE_AXIS;
   }, [tune]);
+
+  const originVec = useMemo(
+    () => (tune ? latLonToVec3(tune.origin.lat, tune.origin.lon) : null),
+    [tune],
+  );
+  const antiVec = useMemo(
+    () => (tune ? latLonToVec3(tune.antipode.lat, tune.antipode.lon) : null),
+    [tune],
+  );
 
   const station: Station | null =
     phase === "tuned" || phase === "tuning"
@@ -237,6 +310,8 @@ export default function App() {
     setPhase("idle");
     setLog([]);
     setPlaying(false);
+    setConnecting(false);
+    setLastSignalNote(false);
     const u = new URL(window.location.href);
     u.search = "";
     window.history.replaceState(null, "", u.toString());
@@ -255,13 +330,22 @@ export default function App() {
   const stationKm = tune && station ? stationDistanceKm(station, tune.origin) : null;
   const offPointKm =
     tune && station ? stationDistanceKm(station, tune.antipode) : null;
-  const headlineKm = tune
-    ? (stationKm ?? haversineKm(tune.origin, tune.antipode))
-    : null;
   const nearPoint = offPointKm === null || offPointKm <= 600;
+
+  const liveMsg =
+    phase === "tuned" && station
+      ? `Now playing ${station.name}, ${station.country || "far side"}`
+      : phase === "failed"
+        ? "The other side is quiet."
+        : phase === "tuning"
+          ? "Tuning."
+          : "";
 
   return (
     <div className="shell">
+      <p className="visually-hidden" aria-live="polite">
+        {liveMsg}
+      </p>
       <header className="top">
         <div className="wordmark">ANTÍPODA.FM</div>
         <div className="top-sub">the broadcast from underneath you</div>
@@ -272,21 +356,21 @@ export default function App() {
           <Globe
             className="globe"
             axis={axis}
-            origin={tune ? latLonToVec3(tune.origin.lat, tune.origin.lon) : null}
-            antipode={tune ? latLonToVec3(tune.antipode.lat, tune.antipode.lon) : null}
+            origin={originVec}
+            antipode={antiVec}
             locked={phase === "tuned" && playing}
           />
           {phase === "tuned" && station && tune && (
             <div className="dial-caption" aria-hidden="true">
               <span className="dial-you">you · {tune.origin.label ?? formatCoord(tune.origin)}</span>
               <span className="dial-far">
-                {station.name} · {formatCoord(tune.antipode)}
+                {tune.land.country.name || "open ocean"} · {formatCoord(tune.antipode)}
               </span>
             </div>
           )}
         </section>
 
-        <section className="panel" aria-live="polite">
+        <section className="panel">
           {phase === "idle" && (
             <div className="intro">
               <h1>
@@ -301,11 +385,12 @@ export default function App() {
                 <button className="btn primary" onClick={locateAndTune}>
                   Tune the other side
                 </button>
-                <div className="search" ref={searchBox}>
+                <div className="search">
                   <label className="visually-hidden" htmlFor="place">
                     or name a place
                   </label>
                   <input
+                    ref={placeInputRef}
                     id="place"
                     type="text"
                     autoComplete="off"
@@ -317,7 +402,7 @@ export default function App() {
                     }}
                   />
                   {places.length > 0 && (
-                    <ul className="place-list" role="listbox">
+                    <ul className="place-list">
                       {places.map((p, i) => (
                         <li key={i}>
                           <button onClick={() => pickPlace(p)}>
@@ -334,6 +419,7 @@ export default function App() {
                   Position unavailable. Name a place instead.
                 </p>
               )}
+              {searchNote && <p className="note">{searchNote}</p>}
               {searching && <p className="note dim">looking…</p>}
               <div className="quick">
                 {QUICK_PLACES.map((q) => (
@@ -359,6 +445,9 @@ export default function App() {
                   trying {station.name} · {station.country}
                 </p>
               )}
+              <button className="btn ghost" onClick={reset}>
+                step back
+              </button>
             </div>
           )}
 
@@ -378,10 +467,17 @@ export default function App() {
                   ? ` · ${station.codec} ${station.bitrate}k`
                   : ""}
               </p>
-              <p className="distance">
-                ≈{formatKm(headlineKm!)} away
-                {nearPoint && " — through the planet"}
-              </p>
+              {stationKm !== null ? (
+                <p className="distance">
+                  ≈{formatKm(stationKm)} away
+                  {nearPoint && " — through the planet"}
+                </p>
+              ) : (
+                <p className="distance">
+                  antipode {formatKm(haversineKm(tune.origin, tune.antipode))} away
+                  {" · station position unmapped"}
+                </p>
+              )}
               {tune.land.oceanKm !== null ? (
                 <p className="note">
                   your antipode is open ocean · nearest landfall{" "}
@@ -393,14 +489,15 @@ export default function App() {
                   antipode {formatCoord(tune.antipode)} · {tune.land.country.name}
                 </p>
               )}
-              {!nearPoint && (
+              {!nearPoint && offPointKm !== null && (
                 <p className="note">
-                  this signal drifts {formatKm(offPointKm!)} from the exact
+                  this signal drifts {formatKm(offPointKm)} from the exact
                   point — a straggler on the dial
                 </p>
               )}
               <div className="controls">
                 <button
+                  ref={playBtnRef}
                   className="btn primary"
                   onClick={() => (playing ? player.current?.pause() : player.current?.resume())}
                 >
@@ -419,6 +516,7 @@ export default function App() {
               <p className="note dim">
                 station {stationIx + 1} of {candidatesRef.current.length} near
                 the point
+                {lastSignalNote && " · last one on the dial"}
               </p>
             </div>
           )}
@@ -428,7 +526,7 @@ export default function App() {
               <h2>The other side is quiet.</h2>
               <p className="lede">{failMsg}</p>
               <div className="actions">
-                <button className="btn primary" onClick={reset}>
+                <button ref={failBtnRef} className="btn primary" onClick={reset}>
                   Try another place
                 </button>
               </div>

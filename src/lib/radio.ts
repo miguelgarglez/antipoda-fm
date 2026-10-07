@@ -1,5 +1,5 @@
 import { GeoPoint, haversineKm } from "./geo-math";
-import { countryAt, nearestLand, Country } from "./earth";
+import { countryAt, nearestLands, Country } from "./earth";
 
 export type Station = {
   stationuuid: string;
@@ -20,9 +20,7 @@ export type TuneResult = {
   origin: GeoPoint;
   antipode: GeoPoint;
   candidates: Station[];
-  land: { country: Country; oceanKm: number | null; nearPoint: GeoPoint | null };
-  /** km from the antipode to the best candidate, if it reports coordinates. */
-  signalKm: number | null;
+  land: { country: Country; oceanKm: number | null };
 };
 
 const MIRRORS = [
@@ -43,9 +41,10 @@ async function rbGet<T>(path: string): Promise<T> {
         signal: ctrl.signal,
         headers: { "User-Agent": "antipoda-fm/0.1" },
       });
+      const body = (await res.json()) as T;
       clearTimeout(timer);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      return (await res.json()) as T;
+      return body;
     } catch (e) {
       lastErr = e;
     }
@@ -58,6 +57,13 @@ type Raw = Record<string, unknown>;
 function toStation(s: Raw): Station | null {
   const url = String(s.url_resolved ?? "").trim();
   if (!url.startsWith("https://")) return null;
+  const geoLat = s.geo_lat;
+  const geoLong = s.geo_long;
+  const located =
+    typeof geoLat === "number" &&
+    typeof geoLong === "number" &&
+    Math.abs(geoLat) <= 90 &&
+    Math.abs(geoLong) <= 180;
   return {
     stationuuid: String(s.stationuuid ?? ""),
     name: String(s.name ?? "").trim().replace(/\s+/g, " "),
@@ -69,8 +75,8 @@ function toStation(s: Raw): Station | null {
     bitrate: Number(s.bitrate ?? 0),
     votes: Number(s.votes ?? 0),
     hls: Number(s.hls ?? 0),
-    geoLat: typeof s.geo_lat === "number" ? s.geo_lat : null,
-    geoLong: typeof s.geo_long === "number" ? s.geo_long : null,
+    geoLat: located ? geoLat : null,
+    geoLong: located ? geoLong : null,
   };
 }
 
@@ -85,78 +91,83 @@ function clean(list: Raw[]): Station[] {
 /** Stations in a country, most-loved first. */
 async function countryStations(iso2: string): Promise<Station[]> {
   const raw = await rbGet<Raw[]>(
-    `/json/stations/bycountrycodeexact/${encodeURIComponent(iso2)}?order=votes&reverse=true&limit=15&hidebroken=true`,
+    `/json/stations/bycountrycodeexact/${encodeURIComponent(iso2)}?order=votes&reverse=true&limit=60&hidebroken=true`,
   );
   return clean(raw);
 }
 
-/** Stations reporting coordinates near a point, haversine-sorted. */
-async function geoStations(p: GeoPoint): Promise<Station[]> {
+/** Fallback for countries with no ISO code: name-contains search. */
+async function namedCountryStations(name: string): Promise<Station[]> {
   const raw = await rbGet<Raw[]>(
-    `/json/stations/search?geo_lat=${p.lat.toFixed(4)}&geo_long=${p.lon.toFixed(4)}` +
-      `&order=votes&reverse=true&limit=200&lastcheckok=1&hidebroken=true`,
+    `/json/stations/search?country=${encodeURIComponent(name)}&order=votes&reverse=true&limit=40&hidebroken=true`,
   );
-  return clean(raw)
-    .filter((s) => s.geoLat !== null && s.geoLong !== null)
-    .sort(
-      (a, b) =>
-        haversineKm(p, { lat: a.geoLat!, lon: a.geoLong! }) -
-        haversineKm(p, { lat: b.geoLat!, lon: b.geoLong! }),
-    );
+  return clean(raw);
+}
+
+async function stationsFor(country: Country): Promise<Station[]> {
+  if (country.iso2) {
+    const found = await countryStations(country.iso2);
+    if (found.length > 0) return found;
+  }
+  return namedCountryStations(country.name).catch(() => []);
 }
 
 /**
- * Find the signals closest to an antipode.
- * Land antipode: that country's best stations, plus any geo-tagged station
- * sitting closer to the point than the country's reach suggests.
- * Ocean antipode: the nearest country's stations, labelled by distance.
+ * Find the signals at an antipode. The Radio Browser API has no proximity
+ * search, so the unit of "near" is the country containing (or nearest to)
+ * the point. Inside a country, stations that report coordinates are ranked
+ * by real distance to the antipode; unlocated stations trail as fallbacks.
+ * For ocean antipodes the nearest few countries are tried in order.
  */
 export async function resolveSignals(origin: GeoPoint, antipode: GeoPoint): Promise<TuneResult> {
   const hit = countryAt(antipode);
-  const near = hit ? null : nearestLand(antipode);
-  const country = hit ?? near!.country;
-  const oceanKm = hit ? null : near!.km;
-  const nearPoint = hit ? null : near!.point;
-
-  const jobs: Promise<Station[]>[] = [
-    country.iso2 ? countryStations(country.iso2).catch(() => []): Promise.resolve([]),
-    geoStations(antipode).catch(() => []),
-  ];
-  const [byCountry, byGeo] = await Promise.all(jobs);
+  const lands = hit
+    ? [{ country: hit, km: 0, point: antipode }]
+    : nearestLands(antipode, 3);
+  const oceanKm = hit ? null : lands[0].km;
 
   const dist = (s: Station) =>
-    s.geoLat === null ? Infinity : haversineKm(antipode, { lat: s.geoLat, lon: s.geoLong! });
+    s.geoLat === null || s.geoLong === null
+      ? Infinity
+      : haversineKm(antipode, { lat: s.geoLat, lon: s.geoLong });
   const rank = (a: Station, b: Station) =>
     a.hls - b.hls ||
     Number(b.codec.toUpperCase().includes("MP3")) - Number(a.codec.toUpperCase().includes("MP3")) ||
     b.votes - a.votes;
 
-  // Three tiers, in order: stations geo-placed near the point, the country's
-  // best stations, then the nearest geo-tagged stations anywhere as backup.
-  const NEAR_KM = 600;
-  const geoNear = byGeo.filter((s) => dist(s) <= NEAR_KM).sort(rank);
-  const seen = new Set<string>();
-  const tiers = [geoNear, byCountry.sort(rank), byGeo.sort((a, b) => dist(a) - dist(b))];
-  const candidates: Station[] = [];
-  for (const tier of tiers) {
-    for (const s of tier) {
+  let candidates: Station[] = [];
+  let lastErr: unknown = null;
+  let tried = 0;
+  for (const land of lands) {
+    tried++;
+    let list: Station[];
+    try {
+      list = await stationsFor(land.country);
+    } catch (e) {
+      lastErr = e;
+      continue;
+    }
+    const located = list.filter((s) => s.geoLat !== null).sort((a, b) => dist(a) - dist(b));
+    const unlocated = list.filter((s) => s.geoLat === null).sort(rank);
+    const seen = new Set<string>();
+    for (const s of [...located, ...unlocated]) {
       if (!seen.has(s.stationuuid) && candidates.length < 10) {
         seen.add(s.stationuuid);
         candidates.push(s);
       }
     }
-    if (candidates.length >= 10) break;
+    if (candidates.length >= 4) break;
   }
 
-  const first = candidates[0];
-  const signalKm = first && first.geoLat !== null ? Math.round(dist(first)) : null;
+  if (candidates.length === 0 && lastErr !== null && tried === lands.length) {
+    throw lastErr;
+  }
 
   return {
     origin,
     antipode,
     candidates,
-    land: { country, oceanKm, nearPoint },
-    signalKm,
+    land: { country: lands[0].country, oceanKm },
   };
 }
 

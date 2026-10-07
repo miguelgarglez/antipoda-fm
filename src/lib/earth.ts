@@ -62,35 +62,91 @@ export const coastRings: Vec3[][] = countries.flatMap((c) =>
   ),
 );
 
-// ---- point in polygon (equirectangular, shifted so query lon sits at 0) ----
+// ---- point in polygon ----
+// Rings are unwrapped once at load: each vertex's longitude is adjusted by
+// ±360 to stay within 180° of the previous vertex. That makes every ring a
+// continuous 2D polygon whose lon range may exceed ±180 (e.g. Russia ~-180..190,
+// Antarctica ~0..360). A query point is then tested in the ring's own frame:
+// the lon representative (lon, lon±360) closest to the ring's centroid.
 
-function ringContains(ring: Position[], lat: number, lonShifted: (l: number) => number, qlon = 0): boolean {
+type PrepRing = {
+  x: number[]; // unwrapped lons
+  y: number[]; // lats
+  lonC: number; // centroid lon (unwrapped)
+  lonMin: number;
+  lonMax: number;
+  latMin: number;
+  latMax: number;
+};
+
+type PrepPoly = { outer: PrepRing; holes: PrepRing[] };
+type PrepCountry = { country: Country; polys: PrepPoly[] };
+
+function prepRing(ring: Position[]): PrepRing {
+  const x: number[] = new Array(ring.length);
+  const y: number[] = new Array(ring.length);
+  let prev = ring[0][0];
+  let lonMin = Infinity, lonMax = -Infinity, latMin = Infinity, latMax = -Infinity;
+  let lonSum = 0;
+  for (let i = 0; i < ring.length; i++) {
+    let lon = ring[i][0];
+    while (lon - prev > 180) lon -= 360;
+    while (lon - prev < -180) lon += 360;
+    prev = lon;
+    x[i] = lon;
+    const lat = ring[i][1];
+    y[i] = lat;
+    lonSum += lon;
+    if (lon < lonMin) lonMin = lon;
+    if (lon > lonMax) lonMax = lon;
+    if (lat < latMin) latMin = lat;
+    if (lat > latMax) latMax = lat;
+  }
+  return { x, y, lonC: lonSum / ring.length, lonMin, lonMax, latMin, latMax };
+}
+
+const prepared: PrepCountry[] = countries.map((country) => ({
+  country,
+  polys: country.polygons.map((rings) => ({
+    outer: prepRing(rings[0]),
+    holes: rings.slice(1).map(prepRing),
+  })),
+}));
+
+function ringContains(r: PrepRing, qlon: number, qlat: number): boolean {
   let inside = false;
-  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
-    const xi = lonShifted(ring[i][0]);
-    const yi = ring[i][1];
-    const xj = lonShifted(ring[j][0]);
-    const yj = ring[j][1];
-    const crosses = yi > lat !== yj > lat;
-    if (crosses && qlon < ((xj - xi) * (lat - yi)) / (yj - yi) + xi) inside = !inside;
+  const { x, y } = r;
+  for (let i = 0, j = x.length - 1; i < x.length; j = i++) {
+    if (y[i] > qlat !== y[j] > qlat && qlon < ((x[j] - x[i]) * (qlat - y[i])) / (y[j] - y[i]) + x[i]) {
+      inside = !inside;
+    }
   }
   return inside;
 }
 
-function shift(lon: number, center: number): number {
-  let l = ((((lon - center) % 360) + 540) % 360) - 180;
-  return l;
+/** The lon representative (lon + 360k) closest to the ring's frame. */
+function rep(lon: number, r: PrepRing): number {
+  const k = Math.round((r.lonC - lon) / 360);
+  return lon + 360 * k;
 }
 
 export function countryAt(p: GeoPoint): Country | null {
-  const shiftTo = (l: number) => shift(l, p.lon);
-  for (const c of countries) {
-    for (const rings of c.polygons) {
-      const outer = rings[0];
-      if (ringContains(outer, p.lat, shiftTo)) {
-        const hole = rings.slice(1).some((r) => ringContains(r, p.lat, shiftTo));
-        if (!hole) return c;
-      }
+  // The 110m coastline is truncated at ~85.6°S; everything south of it is
+  // Antarctica in this dataset. (The North Pole really is open ocean.)
+  if (p.lat <= -85.7) {
+    return countries.find((c) => c.name === "Antarctica") ?? null;
+  }
+  for (const { country, polys } of prepared) {
+    for (const { outer, holes } of polys) {
+      if (p.lat < outer.latMin - 0.5 || p.lat > outer.latMax + 0.5) continue;
+      const q = rep(p.lon, outer);
+      if (q < outer.lonMin - 0.5 || q > outer.lonMax + 0.5) continue;
+      if (!ringContains(outer, q, p.lat)) continue;
+      const inHole = holes.some((h) => {
+        const hq = rep(p.lon, h);
+        return hq >= h.lonMin && hq <= h.lonMax && ringContains(h, hq, p.lat);
+      });
+      if (!inHole) return country;
     }
   }
   return null;
@@ -118,10 +174,10 @@ function distToArc(p: Vec3, a: Vec3, b: Vec3): { km: number; at: Vec3 } {
   return { km: Math.acos(Math.min(1, Math.max(-1, dot(p, at)))) * R_KM, at };
 }
 
-/** Nearest country boundary to an ocean point. */
-export function nearestLand(p: GeoPoint): NearestLand {
+/** The k nearest countries to an ocean point, sorted by distance. */
+export function nearestLands(p: GeoPoint, k = 3): NearestLand[] {
   const pv = latLonToVec3(p.lat, p.lon);
-  let best: NearestLand | null = null;
+  const best = new Map<string, NearestLand>();
   for (const c of countries) {
     for (const rings of c.polygons) {
       for (const ring of rings) {
@@ -129,12 +185,13 @@ export function nearestLand(p: GeoPoint): NearestLand {
           const a = latLonToVec3(ring[i][1], ring[i][0]);
           const b = latLonToVec3(ring[i + 1][1], ring[i + 1][0]);
           const { km, at } = distToArc(pv, a, b);
-          if (!best || km < best.km) {
-            best = { country: c, km, point: vec3ToLatLon(at) };
+          const prev = best.get(c.id);
+          if (!prev || km < prev.km) {
+            best.set(c.id, { country: c, km, point: vec3ToLatLon(at) });
           }
         }
       }
     }
   }
-  return best!;
+  return [...best.values()].sort((a, b) => a.km - b.km).slice(0, k);
 }

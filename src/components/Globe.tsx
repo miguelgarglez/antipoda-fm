@@ -7,6 +7,7 @@ import {
   add,
   scale,
   slerp,
+  rotateAroundAxis,
   latLonToVec3,
 } from "../lib/geo-math";
 import { coastRings } from "../lib/earth";
@@ -59,7 +60,10 @@ export function Globe({ axis, origin, antipode, locked, className }: Props) {
     fromAxis: axis,
     toAxis: axis,
     transitionStart: 0,
-    theta0: Math.random() * Math.PI * 2,
+    // Camera forward vector, rotated incrementally so it never snaps.
+    u: null as Vec3 | null,
+    lastT: 0,
+    dirty: true,
   });
 
   useEffect(() => {
@@ -68,8 +72,13 @@ export function Globe({ axis, origin, antipode, locked, className }: Props) {
       s.fromAxis = s.shownAxis;
       s.toAxis = axis;
       s.transitionStart = performance.now();
+      s.dirty = true;
     }
   }, [axis]);
+
+  useEffect(() => {
+    state.current.dirty = true;
+  }, [origin, antipode, locked]);
 
   useEffect(() => {
     const canvas = canvasRef.current!;
@@ -85,6 +94,7 @@ export function Globe({ axis, origin, antipode, locked, className }: Props) {
       canvas.width = Math.round(rect.width * dpr);
       canvas.height = Math.round(rect.height * dpr);
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      state.current.dirty = true;
     };
     resize();
     const ro = new ResizeObserver(resize);
@@ -92,30 +102,41 @@ export function Globe({ axis, origin, antipode, locked, className }: Props) {
 
     type P = { x: number; y: number; z: number };
     const draw = (now: number) => {
-      const t = now / 1000;
       const s = state.current;
+      const dt = s.lastT ? (now - s.lastT) / 1000 : 0;
+      s.lastT = now;
 
-      // Axis transition (1.4s ease-in-out), then hold.
-      const T = 1400;
-      const k = Math.min(1, (now - s.transitionStart) / T);
+      const moving = !reduced || s.dirty;
+
+      // Axis transition (1.4s ease-in-out), instant under reduced motion.
+      const T = reduced ? 0 : 1400;
+      const k = T === 0 ? 1 : Math.min(1, (now - s.transitionStart) / T);
       const e = k < 0.5 ? 4 * k * k * k : 1 - Math.pow(-2 * k + 2, 3) / 2;
       s.shownAxis = slerp(s.fromAxis, s.toAxis, e);
       const ax = norm(s.shownAxis);
 
-      // Camera orbits the vertical axis; axis itself is screen-up.
-      const theta = reduced ? s.theta0 : s.theta0 + t * DRIFT;
-      const ref: Vec3 = Math.abs(ax[2]) < 0.9 ? [0, 0, 1] : [1, 0, 0];
-      const u0 = norm(cross(ax, ref));
-      const w0 = cross(ax, u0);
-      const u = norm(add(scale(u0, Math.cos(theta)), scale(w0, Math.sin(theta))));
-      const eR = norm(cross(ax, u)); // screen right
-      const eU = ax; // screen up
+      // Camera orbits the vertical axis incrementally; the axis itself is
+      // screen-up, so the chord stays vertical while the world spins.
+      if (!s.u) {
+        const ref: Vec3 = Math.abs(ax[2]) < 0.9 ? [0, 0, 1] : [1, 0, 0];
+        s.u = norm(cross(ax, ref));
+      }
+      if (moving && dt > 0) {
+        s.u = norm(rotateAroundAxis(s.u, ax, DRIFT * dt));
+      }
+      // Re-orthogonalize u against the (possibly moving) axis.
+      let u = s.u;
+      u = norm(add(u, scale(ax, -dot(u, ax))));
+      s.u = u;
 
       const w = canvas.getBoundingClientRect().width;
       const h = canvas.getBoundingClientRect().height;
       const cx = w / 2;
       const cy = h / 2;
       const R = cssSize * 0.4;
+
+      const eR = norm(cross(ax, u)); // screen right
+      const eU = ax; // screen up
 
       const proj = (v: Vec3): P => ({
         x: cx + dot(v, eR) * R,
@@ -230,6 +251,7 @@ export function Globe({ axis, origin, antipode, locked, className }: Props) {
         ctx.stroke();
 
         // Antipode marker (bottom): orange ember; ping when locked.
+        const t = now / 1000;
         const glow = locked && !reduced ? 1 + Math.sin(t * 2.2) * 0.25 : 1;
         const g = ctx.createRadialGradient(cx, cy + R, 0, cx, cy + R, 16 * glow);
         g.addColorStop(0, "rgba(255,77,0,0.75)");
@@ -250,20 +272,22 @@ export function Globe({ axis, origin, antipode, locked, className }: Props) {
           ctx.lineWidth = 1.2;
           ctx.stroke();
         }
+        if (locked) {
+          ctx.beginPath();
+          ctx.arc(cx, cy + R, 5.5, 0, Math.PI * 2);
+          ctx.strokeStyle = PHOSPHOR;
+          ctx.globalAlpha = 0.8;
+          ctx.lineWidth = 1;
+          ctx.stroke();
+          ctx.globalAlpha = 1;
+        }
       }
 
-      // Signal halo tint at the rim when locked.
-      if (origin && antipode && locked) {
-        ctx.beginPath();
-        ctx.arc(cx, cy + R, 5.5, 0, Math.PI * 2);
-        ctx.strokeStyle = PHOSPHOR;
-        ctx.globalAlpha = 0.8;
-        ctx.lineWidth = 1;
-        ctx.stroke();
-        ctx.globalAlpha = 1;
+      // In reduced-motion mode, draw once per change then idle.
+      if (reduced) s.dirty = false;
+      if (!reduced || s.dirty || k < 1) {
+        raf = requestAnimationFrame(draw);
       }
-
-      raf = requestAnimationFrame(draw);
     };
 
     raf = requestAnimationFrame(draw);

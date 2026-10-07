@@ -1,24 +1,40 @@
 import type Hls from "hls.js";
 
-export type PlayerState = "idle" | "connecting" | "playing" | "error";
+export type PlayerState = "idle" | "connecting" | "playing" | "blocked" | "error";
 
 /**
- * Wraps a single <audio> element. Tries a direct stream first; lazily loads
- * hls.js only when a candidate is an HLS playlist the browser can't play.
+ * Wraps a single <audio> element. Every play() gets an attempt token; only
+ * the latest attempt may report state, so stale errors and late HLS imports
+ * can't overwrite a newer stream. HLS playlists route through hls.js unless
+ * the browser plays them natively (Safari).
  */
 export class Player {
   private audio: HTMLAudioElement;
   private hls: Hls | null = null;
   private onState: (s: PlayerState) => void;
   private stallTimer: number | null = null;
+  private attempt = 0;
+  private live = false;
 
   constructor(onState: (s: PlayerState) => void) {
     this.onState = onState;
     this.audio = new Audio();
     this.audio.preload = "none";
-    this.audio.addEventListener("playing", () => this.set("playing"));
-    this.audio.addEventListener("error", () => this.set("error"));
-    this.audio.addEventListener("stalled", () => this.armStall());
+    this.audio.addEventListener("playing", () => {
+      if (this.live) this.set("playing");
+    });
+    this.audio.addEventListener("waiting", () => {
+      if (this.live) this.armStall();
+    });
+    this.audio.addEventListener("error", () => {
+      if (this.live) this.set("error");
+    });
+    this.audio.addEventListener("ended", () => {
+      if (this.live) this.set("error");
+    });
+    this.audio.addEventListener("stalled", () => {
+      if (this.live) this.armStall();
+    });
   }
 
   private set(s: PlayerState) {
@@ -31,29 +47,30 @@ export class Player {
 
   private armStall() {
     if (this.stallTimer !== null) window.clearTimeout(this.stallTimer);
-    this.stallTimer = window.setTimeout(() => this.set("error"), 8000);
+    this.stallTimer = window.setTimeout(() => {
+      if (this.live) this.set("error");
+    }, 9000);
   }
 
-  get volume() {
-    return this.audio.volume;
+  private fail(e: unknown): PlayerState {
+    return e instanceof DOMException && e.name === "NotAllowedError" ? "blocked" : "error";
   }
 
-  setVolume(v: number) {
-    this.audio.volume = v;
-  }
-
-  async play(url: string): Promise<void> {
-    this.stop();
+  async play(url: string, isHls: boolean): Promise<void> {
+    const token = ++this.attempt;
+    this.halt();
+    this.live = true;
     this.set("connecting");
-    const isHls = /\.m3u8(\?|$)/i.test(url);
+    const hlsUrl = isHls || /\.m3u8(\?|$)/i.test(url);
     const nativeHls = this.audio.canPlayType("application/vnd.apple.mpegurl") !== "";
     try {
-      if (isHls && !nativeHls) {
+      if (hlsUrl && !nativeHls) {
         const { default: HlsCtor } = await import("hls.js");
+        if (token !== this.attempt) return;
         if (HlsCtor.isSupported()) {
           this.hls = new HlsCtor({ maxBufferLength: 20 });
           this.hls.on(HlsCtor.Events.ERROR, (_e, data) => {
-            if (data.fatal) this.set("error");
+            if (data.fatal && token === this.attempt) this.set("error");
           });
           this.hls.loadSource(url);
           this.hls.attachMedia(this.audio);
@@ -65,23 +82,33 @@ export class Player {
         this.audio.src = url;
       }
       this.armStall();
-      await this.audio.play();
-    } catch {
-      this.set("error");
+      await this.audio.play().catch((e) => {
+        if (token === this.attempt) throw e;
+      });
+    } catch (e) {
+      if (token === this.attempt) this.set(this.fail(e));
     }
   }
 
   pause() {
+    this.live = false;
     this.audio.pause();
     this.set("idle");
   }
 
   resume() {
+    this.live = true;
     this.set("connecting");
-    this.audio.play().catch(() => this.set("error"));
+    this.armStall();
+    this.audio.play().catch((e) => this.set(this.fail(e)));
   }
 
-  stop() {
+  private halt() {
+    this.live = false;
+    if (this.stallTimer !== null) {
+      window.clearTimeout(this.stallTimer);
+      this.stallTimer = null;
+    }
     this.audio.pause();
     this.audio.removeAttribute("src");
     this.audio.load();
@@ -89,5 +116,11 @@ export class Player {
       this.hls.destroy();
       this.hls = null;
     }
+  }
+
+  stop() {
+    this.attempt++;
+    this.halt();
+    this.set("idle");
   }
 }
