@@ -177,6 +177,7 @@ export default function App() {
     }
     const id = ++runId.current;
     searchSeq.current++;
+    setSearching(false);
     setPhase("tuning");
     setLog([]);
     pushLog("acquiring position…");

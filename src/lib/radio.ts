@@ -104,13 +104,16 @@ async function nearStations(p: GeoPoint): Promise<Station[]> {
         `/json/stations/search?geo_lat=${p.lat}&geo_long=${p.lon}&geo_distance=${r}&order=geo_distance&limit=80&hidebroken=true`,
       );
       ok = true;
-      found = clean(raw)
+      const list = clean(raw)
         .filter((s) => s.geoLat !== null && s.geoLong !== null)
         .sort(
           (a, b) =>
             haversineKm(p, { lat: a.geoLat!, lon: a.geoLong! }) -
             haversineKm(p, { lat: b.geoLat!, lon: b.geoLong! }),
         );
+      // A wider radius should be a superset, but an empty reply must not
+      // discard stations the smaller radius already found.
+      if (list.length > 0 || found.length === 0) found = list;
       if (found.length >= 4) break;
     } catch (e) {
       lastErr = e;

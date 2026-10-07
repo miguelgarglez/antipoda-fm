@@ -302,9 +302,10 @@ export function Globe({ axis, origin, antipode, locked, className }: Props) {
       }
     };
 
-    // Initial layout + first frame — after draw exists.
+    // Initial layout + first frame — after draw exists. resize() may have
+    // already scheduled one under reduced motion; don't double-schedule.
     resize();
-    raf = requestAnimationFrame(draw);
+    if (raf === 0) raf = requestAnimationFrame(draw);
     return () => {
       cancelAnimationFrame(raf);
       ro.disconnect();
