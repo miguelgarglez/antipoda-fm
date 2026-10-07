@@ -233,6 +233,7 @@ export default function App() {
     if (query.trim().length < 2) {
       setPlaces([]);
       setSearchNote(null);
+      setSearching(false);
       return;
     }
     const q = query.trim();
@@ -485,7 +486,7 @@ export default function App() {
               {stationKm !== null ? (
                 <p className="distance">
                   ≈{formatKm(stationKm)} away over the surface
-                  {nearPoint && " — through the planet"}
+                  {nearPoint && " — nearly the span of Earth"}
                 </p>
               ) : (
                 <p className="distance">
@@ -514,6 +515,7 @@ export default function App() {
                 <button
                   ref={playBtnRef}
                   className="btn primary"
+                  disabled={connecting}
                   onClick={() => (playing ? player.current?.pause() : player.current?.resume())}
                 >
                   {playing ? "Pause" : "Listen"}

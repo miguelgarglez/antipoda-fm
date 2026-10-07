@@ -166,6 +166,12 @@ main {
   transform: scale(0.97);
 }
 
+.btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+  transform: none;
+}
+
 .btn.primary {
   border-color: var(--signal);
   color: var(--signal);

@@ -107,7 +107,6 @@ export function Globe({ axis, origin, antipode, locked, className }: Props) {
       // single redraw so a resize doesn't leave a blank canvas.
       requestDraw();
     };
-    resize();
     const ro = new ResizeObserver(resize);
     ro.observe(canvas);
 
@@ -303,6 +302,8 @@ export function Globe({ axis, origin, antipode, locked, className }: Props) {
       }
     };
 
+    // Initial layout + first frame — after draw exists.
+    resize();
     raf = requestAnimationFrame(draw);
     return () => {
       cancelAnimationFrame(raf);

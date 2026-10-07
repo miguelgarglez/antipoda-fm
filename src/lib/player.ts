@@ -102,6 +102,9 @@ export class Player {
   }
 
   resume() {
+    // Nothing to resume while a play() is still initializing its source —
+    // bumping the token here would cancel that import and strand the card.
+    if (!this.audio.src && !this.hls) return;
     const token = ++this.attempt;
     this.live = true;
     this.set("connecting");

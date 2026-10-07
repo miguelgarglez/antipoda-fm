@@ -96,19 +96,29 @@ function clean(list: Raw[]): Station[] {
 async function nearStations(p: GeoPoint): Promise<Station[]> {
   const radii = [1_000_000, 2_500_000, 6_000_000];
   let found: Station[] = [];
+  let lastErr: unknown = null;
+  let ok = false;
   for (const r of radii) {
-    const raw = await rbGet<Raw[]>(
-      `/json/stations/search?geo_lat=${p.lat}&geo_long=${p.lon}&geo_distance=${r}&order=geo_distance&limit=80&hidebroken=true`,
-    );
-    found = clean(raw)
-      .filter((s) => s.geoLat !== null && s.geoLong !== null)
-      .sort(
-        (a, b) =>
-          haversineKm(p, { lat: a.geoLat!, lon: a.geoLong! }) -
-          haversineKm(p, { lat: b.geoLat!, lon: b.geoLong! }),
+    try {
+      const raw = await rbGet<Raw[]>(
+        `/json/stations/search?geo_lat=${p.lat}&geo_long=${p.lon}&geo_distance=${r}&order=geo_distance&limit=80&hidebroken=true`,
       );
-    if (found.length >= 4) break;
+      ok = true;
+      found = clean(raw)
+        .filter((s) => s.geoLat !== null && s.geoLong !== null)
+        .sort(
+          (a, b) =>
+            haversineKm(p, { lat: a.geoLat!, lon: a.geoLong! }) -
+            haversineKm(p, { lat: b.geoLat!, lon: b.geoLong! }),
+        );
+      if (found.length >= 4) break;
+    } catch (e) {
+      lastErr = e;
+      // Keep whatever earlier radii already gave us.
+      if (found.length > 0) break;
+    }
   }
+  if (!ok && found.length === 0) throw lastErr;
   return found.slice(0, 8);
 }
 
@@ -181,9 +191,10 @@ export async function resolveSignals(origin: GeoPoint, antipode: GeoPoint): Prom
           s.geoLat === null || s.geoLong === null
             ? Infinity
             : haversineKm(antipode, { lat: s.geoLat, lon: s.geoLong });
+        // push() dedupes against proximity results and stops at the cap, so
+        // later lands keep topping up after overlaps.
         [...list]
           .sort((a, b) => dist(a) - dist(b) || rank(a, b))
-          .slice(0, 5)
           .forEach(push);
       } catch (e) {
         lastErr = e;

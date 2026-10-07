@@ -135,11 +135,11 @@ function rep(lon: number, r: PrepRing): number {
 }
 
 export function countryAt(p: GeoPoint): Country | null {
-  // The 110m coastline truncates the Antarctic interior around 85°S — its
-  // ring's artificial southern edge sits at ~84.7°S. South of 85°S nothing
-  // in this dataset is open water, so contain the polar cap explicitly.
+  // The 110m coastline truncates the Antarctic interior: the ring's
+  // southern edge is a data seam around 84–85.6°S, and no open water in
+  // this dataset lies south of 84°S. Contain the polar cap explicitly.
   // (The North Pole really is open ocean.)
-  if (p.lat <= -85.0) {
+  if (p.lat <= -84.0) {
     return countries.find((c) => c.name === "Antarctica") ?? null;
   }
   for (const { country, polys } of prepared) {
