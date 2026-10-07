@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Globe } from "./components/Globe";
+import { Dial } from "./components/Dial";
+import { Scope } from "./components/Scope";
 import {
   GeoPoint,
   Vec3,
@@ -13,6 +15,9 @@ import {
 import { resolveSignals, stationDistanceKm, Station, TuneResult } from "./lib/radio";
 import { searchPlaces, describePlace, Place } from "./lib/geocode";
 import { Player, PlayerState } from "./lib/player";
+import { fetchThere, There } from "./lib/there";
+import { probeCors } from "./lib/probe";
+import { toggleSound, staticBurst, detentClick, lockBlip } from "./lib/sound";
 
 type Phase = "idle" | "tuning" | "tuned" | "failed";
 
@@ -35,6 +40,11 @@ export default function App() {
   const [searching, setSearching] = useState(false);
   const [searchNote, setSearchNote] = useState<string | null>(null);
   const [lastSignalNote, setLastSignalNote] = useState(false);
+  const [armed, setArmed] = useState(false);
+  const [boreDone, setBoreDone] = useState(false);
+  const [there, setThere] = useState<There | null>(null);
+  const [snd, setSnd] = useState(false);
+  const [dragHint, setDragHint] = useState(true);
 
   const player = useRef<Player | null>(null);
   const candidatesRef = useRef<Station[]>([]);
@@ -63,7 +73,14 @@ export default function App() {
     stationIxRef.current = ix;
     setStationIx(ix);
     setLastSignalNote(false);
-    player.current?.play(c.urlResolved, c.hls === 1);
+    void (async () => {
+      // Metered playback needs the stream's CORS verdict before play() wires
+      // the element — a non-CORS source routed through WebAudio is muted.
+      const ok = await probeCors(c.urlResolved);
+      if (stationIxRef.current !== ix) return; // superseded mid-probe
+      player.current?.setAnalyse(ok);
+      void player.current?.play(c.urlResolved, c.hls === 1);
+    })();
   }, []);
 
   const nextCandidate = useCallback(
@@ -124,6 +141,19 @@ export default function App() {
     return () => player.current?.stop();
   }, [onPlayerState]);
 
+  const onBoreComplete = useCallback(() => {
+    setBoreDone(true);
+    const n = candidatesRef.current.length;
+    if (n === 0) {
+      setPhase("failed");
+      setFailMsg("The other side is silent tonight — no living station found.");
+      return;
+    }
+    pushLog(`locking signal 1 of ${n}…`);
+    tryStation(0);
+    lockBlip();
+  }, [tryStation]);
+
   const startTune = useCallback(
     async (origin: GeoPoint) => {
       const id = ++runId.current;
@@ -137,19 +167,24 @@ export default function App() {
       setConnecting(false);
       setCopied(false);
       setLastSignalNote(false);
+      setArmed(false);
+      setBoreDone(false);
+      setThere(null);
+      pendingOrigin.current = origin;
       const anti = antipodeOf(origin);
       pushLog("piercing the planet…");
 
       let res: TuneResult;
       try {
-        [res] = await Promise.all([
-          resolveSignals(origin, anti),
-          new Promise((r) => setTimeout(r, 1500)),
-        ]);
+        res = await resolveSignals(origin, anti);
       } catch {
         if (id !== runId.current) return;
         setPhase("failed");
-        setFailMsg("Couldn't reach the dial — check your connection and try again.");
+        setFailMsg(
+          navigator.onLine === false
+            ? "You're off the grid — the far side can't hear you right now."
+            : "Couldn't reach the dial — check your connection and try again.",
+        );
         return;
       }
       if (id !== runId.current) return;
@@ -158,16 +193,15 @@ export default function App() {
       const tuned: TuneResult = { ...res, origin, antipode: anti };
       setTune(tuned);
       candidatesRef.current = res.candidates;
+      setArmed(true); // the probe may now punch through
 
-      if (res.candidates.length === 0) {
-        setPhase("failed");
-        setFailMsg("The other side is silent tonight — no living station found.");
-        return;
-      }
-      pushLog(`locking signal 1 of ${res.candidates.length}…`);
-      tryStation(0);
+      // What it's like over there, once the signal is the story.
+      const where = res.land.oceanKm !== null ? res.land.point : anti;
+      void fetchThere(where).then((t) => {
+        if (id === runId.current && t) setThere(t);
+      });
     },
-    [tryStation],
+    [],
   );
 
   const locateAndTune = useCallback(() => {
@@ -298,8 +332,17 @@ export default function App() {
 
   const axis: Vec3 = useMemo(() => {
     if (tune) return latLonToVec3(tune.origin.lat, tune.origin.lon);
+    if (phase === "tuning") return latLonToVec3(0, 0); // placeholder until tune lands
     return POLE_AXIS;
-  }, [tune]);
+  }, [tune, phase]);
+
+  const pendingOrigin = useRef<GeoPoint | null>(null);
+  const axisVec: Vec3 = useMemo(() => {
+    if (pendingOrigin.current && phase === "tuning") {
+      return latLonToVec3(pendingOrigin.current.lat, pendingOrigin.current.lon);
+    }
+    return axis;
+  }, [axis, phase]);
 
   const originVec = useMemo(
     () => (tune ? latLonToVec3(tune.origin.lat, tune.origin.lon) : null),
@@ -311,7 +354,7 @@ export default function App() {
   );
 
   const station: Station | null =
-    phase === "tuned" || phase === "tuning"
+    phase === "tuned" || (phase === "tuning" && boreDone)
       ? (candidatesRef.current[stationIx] ?? null)
       : null;
 
@@ -319,12 +362,16 @@ export default function App() {
     runId.current++;
     player.current?.stop();
     candidatesRef.current = [];
+    pendingOrigin.current = null;
     setTune(null);
     setPhase("idle");
     setLog([]);
     setPlaying(false);
     setConnecting(false);
     setLastSignalNote(false);
+    setArmed(false);
+    setBoreDone(false);
+    setThere(null);
     const u = new URL(window.location.href);
     u.search = "";
     window.history.replaceState(null, "", u.toString());
@@ -338,6 +385,13 @@ export default function App() {
     } catch {
       setCopied(false);
     }
+  };
+
+  const selectSignal = (i: number) => {
+    if (i === stationIxRef.current || i < 0 || i >= candidatesRef.current.length) return;
+    if (phaseRef.current !== "tuned" && phaseRef.current !== "tuning") return;
+    pushLog(`retuning to signal ${i + 1}…`);
+    tryStation(i);
   };
 
   const stationKm = tune && station ? stationDistanceKm(station, tune.origin) : null;
@@ -358,6 +412,8 @@ export default function App() {
           ? "Tuning."
           : "";
 
+  const boring = phase === "tuning" && !boreDone;
+
   return (
     <div className="shell">
       <p className="visually-hidden" aria-live="polite">
@@ -365,25 +421,51 @@ export default function App() {
       </p>
       <header className="top">
         <div className="wordmark">ANTÍPODA.FM</div>
-        <div className="top-sub">the broadcast from underneath you</div>
+        <div className="top-right">
+          <button
+            className={`snd ${snd ? "on" : ""}`}
+            onClick={() => {
+              setSnd(toggleSound());
+              if (!snd) detentClick();
+            }}
+            aria-pressed={snd}
+            title={snd ? "Mute tuning sounds" : "Enable tuning sounds"}
+          >
+            {snd ? "SND·ON" : "SND·OFF"}
+          </button>
+          <div className="top-sub">the broadcast from underneath you</div>
+        </div>
       </header>
 
-      <main>
-        <section className="stage" aria-label="Earth">
+      <main className="hero">
+        <section className={`stage ${boring ? "boring" : ""}`} aria-label="Earth">
           <Globe
             className="globe"
-            axis={axis}
+            axis={axisVec}
             origin={originVec}
             antipode={antiVec}
             locked={phase === "tuned" && playing}
+            boring={boring}
+            armed={armed}
+            onBoreComplete={onBoreComplete}
           />
-          {phase === "tuned" && station && tune && (
+          {phase !== "idle" && tune && (
             <div className="dial-caption" aria-hidden="true">
               <span className="dial-you">you · {tune.origin.label ?? formatCoord(tune.origin)}</span>
               <span className="dial-far">
                 {tune.land.country.name || "open ocean"} · {formatCoord(tune.antipode)}
               </span>
             </div>
+          )}
+          {phase === "idle" && dragHint && (
+            <button
+              className="drag-hint"
+              onClick={() => setDragHint(false)}
+              aria-hidden="true"
+              tabIndex={-1}
+            >
+              drag the planet
+            </button>
           )}
         </section>
 
@@ -462,6 +544,14 @@ export default function App() {
                   trying {station.name} · {station.country}
                 </p>
               )}
+              <Dial
+                count={candidatesRef.current.length}
+                index={stationIx}
+                sweeping={!boreDone}
+                onSelect={selectSignal}
+                onMove={() => snd && staticBurst(90, 0.028)}
+                label="searching the band"
+              />
               <button className="btn ghost" onClick={reset}>
                 step back
               </button>
@@ -470,7 +560,6 @@ export default function App() {
 
           {phase === "tuned" && station && tune && (
             <div className="card">
-              <div className="carrier" aria-hidden="true" data-on={playing} />
               <div className="onair">
                 <span className={`dot ${playing ? "on" : ""}`} />
                 {playing ? "ON AIR" : connecting ? "CONNECTING" : "PAUSED"}
@@ -486,7 +575,7 @@ export default function App() {
               </p>
               {stationKm !== null ? (
                 <p className="distance">
-                  ≈{formatKm(stationKm)} away over the surface
+                  ≈{formatKm(stationKm)} over the surface
                   {nearPoint && " — nearly the span of Earth"}
                 </p>
               ) : (
@@ -495,6 +584,24 @@ export default function App() {
                   away over the surface · station position unmapped
                 </p>
               )}
+              <p className="bore-line">signal path 12,742 km — through the mantle and core</p>
+              <Scope
+                className="scope"
+                player={player.current}
+                active={playing}
+                connecting={connecting}
+              />
+              <Dial
+                count={candidatesRef.current.length}
+                index={stationIx}
+                sweeping={false}
+                onSelect={selectSignal}
+                onMove={() => snd && staticBurst(90, 0.028)}
+                onLock={() => {
+                  if (snd) detentClick();
+                }}
+                label={station.name}
+              />
               {tune.land.oceanKm !== null ? (
                 <p className="note">
                   your antipode is open ocean · nearest landfall{" "}
@@ -504,6 +611,12 @@ export default function App() {
               ) : (
                 <p className="note">
                   antipode {formatCoord(tune.antipode)} · {tune.land.country.name}
+                </p>
+              )}
+              {there && (
+                <p className="there">
+                  {there.isDay ? "☀" : "☾"} there it's{" "}
+                  <b>{there.time}</b>, {there.tempC}°, {there.phrase}
                 </p>
               )}
               {!nearPoint && offPointKm !== null && (
@@ -521,9 +634,6 @@ export default function App() {
                 >
                   {playing ? "Pause" : "Listen"}
                 </button>
-                <button className="btn" onClick={() => nextCandidate("")}>
-                  Another signal
-                </button>
                 <button className="btn" onClick={copyLink}>
                   {copied ? "Copied" : "Copy link"}
                 </button>
@@ -531,11 +641,9 @@ export default function App() {
                   Elsewhere
                 </button>
               </div>
-              <p className="note dim">
-                station {stationIx + 1} of {candidatesRef.current.length} near
-                the point
-                {lastSignalNote && " · last one on the dial"}
-              </p>
+              {lastSignalNote && (
+                <p className="note dim">last signal on the dial</p>
+              )}
             </div>
           )}
 
@@ -556,7 +664,7 @@ export default function App() {
       <footer className="foot">
         <span>stations · radio-browser.info</span>
         <span>earth · natural earth</span>
-        <span>signals sometimes sleep — try another</span>
+        <span>arrows or drag tune the dial</span>
       </footer>
     </div>
   );

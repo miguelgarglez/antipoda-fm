@@ -11,12 +11,19 @@ import {
   latLonToVec3,
 } from "../lib/geo-math";
 import { coastRings } from "../lib/earth";
+import { drawSection, layerAt, DIAMETER_KM, BOUNDS } from "../lib/section";
 
 type Props = {
   axis: Vec3;
   origin: Vec3 | null;
   antipode: Vec3 | null;
   locked: boolean;
+  /** Bore sequence: the disc opens into a cross-section while the probe descends. */
+  boring: boolean;
+  /** Resolver finished — the probe may punch through and exit. */
+  armed: boolean;
+  /** Fired once when the probe exits the far surface. */
+  onBoreComplete?: () => void;
   className?: string;
 };
 
@@ -25,6 +32,11 @@ const ORANGE = "#FF4D00";
 const PHOSPHOR = "#7CFFB2";
 
 const DRIFT = 0.045; // rad/s camera orbit around the vertical axis
+
+// Boundary crossings as chord fractions -> boundary circle radius / R.
+const CROSSINGS = [BOUNDS.mantleCore, BOUNDS.outerInner, 1 - BOUNDS.outerInner, 1 - BOUNDS.mantleCore].map(
+  (f) => ({ frac: f, r: Math.abs(1 - 2 * f) }),
+);
 
 // Precomputed graticule: parallels every 30deg, meridians every 30deg.
 const GRATICULE: Vec3[][] = (() => {
@@ -53,7 +65,7 @@ const STARS: { x: number; y: number; r: number; a: number }[] = Array.from(
   }),
 );
 
-export function Globe({ axis, origin, antipode, locked, className }: Props) {
+export function Globe({ axis, origin, antipode, locked, boring, armed, onBoreComplete, className }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const state = useRef({
     shownAxis: axis,
@@ -62,10 +74,32 @@ export function Globe({ axis, origin, antipode, locked, className }: Props) {
     transitionStart: 0,
     // Camera forward vector, rotated incrementally so it never snaps.
     u: null as Vec3 | null,
+    userVel: 0,
+    dragging: false,
+    lastX: 0,
+    lastMoveT: 0,
+    morphT: 0,
+    probeT: -1,
+    boreDone: false,
+    flashes: [] as { t: number; at: number }[],
+    crossed: new Set<number>(),
     lastT: 0,
     dirty: true,
     requestDraw: () => {},
+    boring,
+    armed,
+    locked,
+    origin,
+    antipode,
+    onBoreComplete,
   });
+  const s = state.current;
+  s.boring = boring;
+  s.armed = armed;
+  s.locked = locked;
+  s.origin = origin;
+  s.antipode = antipode;
+  s.onBoreComplete = onBoreComplete;
 
   useEffect(() => {
     const s = state.current;
@@ -77,6 +111,20 @@ export function Globe({ axis, origin, antipode, locked, className }: Props) {
       s.requestDraw();
     }
   }, [axis]);
+
+  useEffect(() => {
+    const s = state.current;
+    if (boring) {
+      s.boreDone = false;
+      s.crossed.clear();
+      if (s.probeT < 0) s.probeT = 0;
+    } else {
+      s.probeT = -1;
+      s.flashes = [];
+    }
+    s.dirty = true;
+    s.requestDraw();
+  }, [boring, armed]);
 
   useEffect(() => {
     state.current.dirty = true;
@@ -110,6 +158,41 @@ export function Globe({ axis, origin, antipode, locked, className }: Props) {
     const ro = new ResizeObserver(resize);
     ro.observe(canvas);
 
+    // Drag to spin: horizontal drag rotates the camera around the chord axis.
+    const onDown = (e: PointerEvent) => {
+      const s = state.current;
+      s.dragging = true;
+      s.lastX = e.clientX;
+      s.lastMoveT = performance.now();
+      s.userVel = 0;
+      canvas.setPointerCapture(e.pointerId);
+      canvas.style.cursor = "grabbing";
+    };
+    const onMove = (e: PointerEvent) => {
+      const s = state.current;
+      if (!s.dragging || !s.u) return;
+      const dx = e.clientX - s.lastX;
+      const now = performance.now();
+      const dt = Math.max(1, now - s.lastMoveT);
+      s.lastX = e.clientX;
+      s.lastMoveT = now;
+      const rot = dx * 0.007;
+      const ax = norm(s.shownAxis);
+      s.u = norm(rotateAroundAxis(s.u, ax, rot));
+      s.userVel = reduced ? 0 : rot / (dt / 1000); // rad/s for release inertia
+      s.dirty = true;
+      s.requestDraw();
+    };
+    const onUp = () => {
+      const s = state.current;
+      s.dragging = false;
+      canvas.style.cursor = "grab";
+    };
+    canvas.addEventListener("pointerdown", onDown);
+    canvas.addEventListener("pointermove", onMove);
+    canvas.addEventListener("pointerup", onUp);
+    canvas.addEventListener("pointercancel", onUp);
+
     type P = { x: number; y: number; z: number };
     const draw = (now: number) => {
       const s = state.current;
@@ -125,16 +208,16 @@ export function Globe({ axis, origin, antipode, locked, className }: Props) {
       s.shownAxis = slerp(s.fromAxis, s.toAxis, e);
       const ax = norm(s.shownAxis);
 
-      // Camera orbits the vertical axis incrementally; the axis itself is
-      // screen-up, so the chord stays vertical while the world spins.
       if (!s.u) {
         const ref: Vec3 = Math.abs(ax[2]) < 0.9 ? [0, 0, 1] : [1, 0, 0];
         s.u = norm(cross(ax, ref));
       }
-      if (moving && dt > 0) {
-        s.u = norm(rotateAroundAxis(s.u, ax, DRIFT * dt));
+      if (moving && dt > 0 && !s.dragging) {
+        // Baseline drift plus decaying release inertia.
+        s.userVel *= Math.pow(0.12, dt);
+        if (Math.abs(s.userVel) < 0.01) s.userVel = 0;
+        s.u = norm(rotateAroundAxis(s.u, ax, (DRIFT + s.userVel) * dt));
       }
-      // Re-orthogonalize u against the (possibly moving) axis.
       let u = s.u;
       u = norm(add(u, scale(ax, -dot(u, ax))));
       s.u = u;
@@ -165,14 +248,42 @@ export function Globe({ axis, origin, antipode, locked, className }: Props) {
         ctx.fill();
       }
 
-      // Earth disc + rim
+      // Bore morph: 0 = wireframe planet, 1 = opened cross-section.
+      const morphTarget = s.boring ? 1 : 0;
+      if (reduced) s.morphT = morphTarget;
+      else s.morphT += (morphTarget - s.morphT) * Math.min(1, dt * 5.2);
+      if (Math.abs(morphTarget - s.morphT) < 0.004) s.morphT = morphTarget;
+      const morph = s.morphT;
+
+      // Probe travel: decelerating crawl to a hold at 90%, punch on armed.
+      if (s.boring && s.probeT >= 0 && !s.boreDone) {
+        if (reduced) {
+          s.probeT = s.armed ? 1 : 0.9;
+        } else {
+          const target = s.armed ? 1 : 0.9;
+          const rate = s.armed ? 3.4 : 1.05;
+          s.probeT += (target - s.probeT) * Math.min(1, dt * rate);
+        }
+        // Boundary crossings flash their circle.
+        for (const c of CROSSINGS) {
+          if (s.probeT >= c.frac && !s.crossed.has(c.frac)) {
+            s.crossed.add(c.frac);
+            s.flashes.push({ t: now / 1000, at: c.r });
+          }
+        }
+        if (s.probeT >= 0.995 && s.armed) {
+          s.probeT = 1;
+          s.boreDone = true;
+          navigator.vibrate?.(12);
+          s.onBoreComplete?.();
+        }
+      }
+
+      // Earth disc fill.
       ctx.beginPath();
       ctx.arc(cx, cy, R, 0, Math.PI * 2);
-      ctx.fillStyle = "rgba(242,238,227,0.025)";
+      ctx.fillStyle = `rgba(242,238,227,${0.025 * (1 - morph)})`;
       ctx.fill();
-      ctx.strokeStyle = "rgba(242,238,227,0.4)";
-      ctx.lineWidth = 1;
-      ctx.stroke();
 
       // Hemisphere-clipped polyline pass.
       const strokeRing = (
@@ -217,21 +328,47 @@ export function Globe({ axis, origin, antipode, locked, className }: Props) {
         ctx.stroke();
       };
 
-      for (const ring of GRATICULE) {
-        strokeRing(ring, false, false, "rgba(242,238,227,0.045)", 0.6);
-      }
-      for (const ring of coastRings) {
-        strokeRing(ring, true, false, "rgba(90,100,120,0.14)", 0.7);
-      }
-      for (const ring of GRATICULE) {
-        strokeRing(ring, false, true, "rgba(242,238,227,0.10)", 0.7);
-      }
-      for (const ring of coastRings) {
-        strokeRing(ring, true, true, "rgba(122,139,168,0.65)", 1);
+      const wireA = 1 - morph;
+      if (wireA > 0.02) {
+        ctx.save();
+        ctx.globalAlpha = wireA;
+        for (const ring of GRATICULE) {
+          strokeRing(ring, false, false, "rgba(242,238,227,0.045)", 0.6);
+        }
+        for (const ring of coastRings) {
+          strokeRing(ring, true, false, "rgba(90,100,120,0.14)", 0.7);
+        }
+        for (const ring of GRATICULE) {
+          strokeRing(ring, false, true, "rgba(242,238,227,0.10)", 0.7);
+        }
+        for (const ring of coastRings) {
+          strokeRing(ring, true, true, "rgba(122,139,168,0.65)", 1);
+        }
+        ctx.restore();
       }
 
+      // The opened planet.
+      if (morph > 0.02) {
+        ctx.save();
+        ctx.globalAlpha = morph;
+        drawSection(ctx, cx, cy, R, {
+          probe: s.boring ? s.probeT : -1,
+          beamAlpha: 1,
+          flashes: reduced ? [] : s.flashes,
+          t: now / 1000,
+        });
+        ctx.restore();
+      }
+
+      // Rim — shared by both views.
+      ctx.beginPath();
+      ctx.arc(cx, cy, R, 0, Math.PI * 2);
+      ctx.strokeStyle = `rgba(242,238,227,${morph > 0.5 ? 0.55 : 0.4})`;
+      ctx.lineWidth = morph > 0.5 ? 1.4 : 1;
+      ctx.stroke();
+
       // Chord through the planet: the diameter joining the two points.
-      if (origin && antipode) {
+      if (s.origin && s.antipode && morph < 0.02) {
         ctx.save();
         ctx.setLineDash([1.5, 5]);
         ctx.strokeStyle = ORANGE;
@@ -242,13 +379,15 @@ export function Globe({ axis, origin, antipode, locked, className }: Props) {
         ctx.lineTo(cx, cy + R);
         ctx.stroke();
         ctx.lineWidth = 1.4;
-        ctx.globalAlpha = locked ? 0.95 : 0.7;
+        ctx.globalAlpha = s.locked ? 0.95 : 0.7;
         ctx.beginPath();
         ctx.moveTo(cx, cy - R);
         ctx.lineTo(cx, cy + R);
         ctx.stroke();
         ctx.restore();
+      }
 
+      if (s.origin && s.antipode) {
         // Origin marker (top): bone dot + quiet ring.
         ctx.beginPath();
         ctx.arc(cx, cy - R, 3, 0, Math.PI * 2);
@@ -262,9 +401,9 @@ export function Globe({ axis, origin, antipode, locked, className }: Props) {
 
         // Antipode marker (bottom): orange ember; ping when locked.
         const t = now / 1000;
-        const glow = locked && !reduced ? 1 + Math.sin(t * 2.2) * 0.25 : 1;
+        const glow = s.locked && !reduced ? 1 + Math.sin(t * 2.2) * 0.25 : 1;
         const g = ctx.createRadialGradient(cx, cy + R, 0, cx, cy + R, 16 * glow);
-        g.addColorStop(0, "rgba(255,77,0,0.75)");
+        g.addColorStop(0, `rgba(255,77,0,${s.boring && !s.boreDone ? 0.3 : 0.75})`);
         g.addColorStop(1, "rgba(255,77,0,0)");
         ctx.beginPath();
         ctx.arc(cx, cy + R, 16 * glow, 0, Math.PI * 2);
@@ -274,7 +413,7 @@ export function Globe({ axis, origin, antipode, locked, className }: Props) {
         ctx.arc(cx, cy + R, 3.6, 0, Math.PI * 2);
         ctx.fillStyle = ORANGE;
         ctx.fill();
-        if (locked && !reduced) {
+        if (s.locked && !reduced) {
           const ph = (t % 1.8) / 1.8;
           ctx.beginPath();
           ctx.arc(cx, cy + R, 4 + ph * 26, 0, Math.PI * 2);
@@ -282,7 +421,7 @@ export function Globe({ axis, origin, antipode, locked, className }: Props) {
           ctx.lineWidth = 1.2;
           ctx.stroke();
         }
-        if (locked) {
+        if (s.locked) {
           ctx.beginPath();
           ctx.arc(cx, cy + R, 5.5, 0, Math.PI * 2);
           ctx.strokeStyle = PHOSPHOR;
@@ -293,7 +432,27 @@ export function Globe({ axis, origin, antipode, locked, className }: Props) {
         }
       }
 
-      // In reduced-motion mode, draw once per change then idle.
+      // Depth counter under the disc while boring.
+      if (s.boring && s.probeT >= 0 && morph > 0.5) {
+        const depth = Math.round(s.probeT * DIAMETER_KM).toLocaleString("en-US");
+        const parts: [string, string][] = [
+          ["depth ", "rgba(152,161,184,0.9)"],
+          [`${depth} km`, "rgba(124,255,178,0.95)"],
+          [` · ${layerAt(s.probeT)}`, "rgba(152,161,184,0.9)"],
+        ];
+        ctx.font = "11px 'IBM Plex Mono', monospace";
+        ctx.textAlign = "left";
+        const totalW = parts.reduce((acc, [txt]) => acc + ctx.measureText(txt).width, 0);
+        let x0 = cx - totalW / 2;
+        for (const [txt, color] of parts) {
+          ctx.fillStyle = color;
+          ctx.fillText(txt, x0, cy + R + 26);
+          x0 += ctx.measureText(txt).width;
+        }
+      }
+
+      // In reduced-motion mode, draw once per change then idle. The armed
+      // flip re-enters through requestDraw, so a waiting probe can rest here.
       if (reduced) s.dirty = false;
       if (!reduced || s.dirty || k < 1) {
         raf = requestAnimationFrame(draw);
@@ -309,6 +468,10 @@ export function Globe({ axis, origin, antipode, locked, className }: Props) {
     return () => {
       cancelAnimationFrame(raf);
       ro.disconnect();
+      canvas.removeEventListener("pointerdown", onDown);
+      canvas.removeEventListener("pointermove", onMove);
+      canvas.removeEventListener("pointerup", onUp);
+      canvas.removeEventListener("pointercancel", onUp);
     };
   }, [origin, antipode, locked]);
 

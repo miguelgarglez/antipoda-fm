@@ -7,6 +7,13 @@ export type PlayerState = "idle" | "connecting" | "playing" | "blocked" | "error
  * the latest attempt may report state, so stale errors and late HLS imports
  * can't overwrite a newer stream. HLS playlists route through hls.js unless
  * the browser plays them natively (Safari).
+ *
+ * Optional metering: when the stream answers a CORS probe, the element is
+ * routed through an AnalyserNode so the scope draws the real waveform. The
+ * probe must pass BEFORE the src is assigned — a non-CORS resource stays
+ * "tainted" forever, and routing it through the graph would mute it. When
+ * analysis isn't possible the element plays direct and callers fall back to
+ * a synthetic carrier.
  */
 export class Player {
   private audio: HTMLAudioElement;
@@ -16,25 +23,53 @@ export class Player {
   private attempt = 0;
   private live = false;
 
+  private actx: AudioContext | null = null;
+  private sourceNode: MediaElementAudioSourceNode | null = null;
+  private analyser: AnalyserNode | null = null;
+  private waveBuf: Float32Array<ArrayBuffer> | null = null;
+  private wantGraph = false;
+
   constructor(onState: (s: PlayerState) => void) {
     this.onState = onState;
-    this.audio = new Audio();
-    this.audio.preload = "none";
-    this.audio.addEventListener("playing", () => {
+    this.audio = this.newAudio();
+  }
+
+  private newAudio(): HTMLAudioElement {
+    const a = new Audio();
+    a.preload = "none";
+    a.addEventListener("playing", () => {
       if (this.live) this.set("playing");
     });
-    this.audio.addEventListener("waiting", () => {
+    a.addEventListener("waiting", () => {
       if (this.live) this.armStall();
     });
-    this.audio.addEventListener("error", () => {
+    a.addEventListener("error", () => {
       if (this.live) this.set("error");
     });
-    this.audio.addEventListener("ended", () => {
+    a.addEventListener("ended", () => {
       if (this.live) this.set("error");
     });
-    this.audio.addEventListener("stalled", () => {
+    a.addEventListener("stalled", () => {
       if (this.live) this.armStall();
     });
+    return a;
+  }
+
+  /** True when the scope is drawing real audio data. */
+  get analysing(): boolean {
+    return this.analyser !== null;
+  }
+
+  /** Latest time-domain samples, or null when the stream can't be analysed. */
+  getWave(): Float32Array<ArrayBuffer> | null {
+    if (!this.analyser || !this.waveBuf) return null;
+    this.analyser.getFloatTimeDomainData(this.waveBuf);
+    return this.waveBuf;
+  }
+
+  /** Decide before play() whether the next stream may be routed for metering. */
+  setAnalyse(ok: boolean) {
+    this.wantGraph = ok;
   }
 
   private set(s: PlayerState) {
@@ -56,9 +91,47 @@ export class Player {
     return e instanceof DOMException && e.name === "NotAllowedError" ? "blocked" : "error";
   }
 
+  /**
+   * Route audio through an AnalyserNode, or rebuild a direct element.
+   * Runs only while halted (no live stream), so swapping the element is safe.
+   */
+  private async setupRoute(want: boolean): Promise<void> {
+    if (want && !this.sourceNode && "AudioContext" in window) {
+      if (!this.actx) this.actx = new AudioContext();
+      if (this.actx.state === "suspended") {
+        try {
+          await this.actx.resume();
+        } catch {
+          /* stays suspended */
+        }
+      }
+      if (this.actx.state === "running") {
+        this.sourceNode = this.actx.createMediaElementSource(this.audio);
+        this.analyser = this.actx.createAnalyser();
+        this.analyser.fftSize = 1024;
+        this.analyser.smoothingTimeConstant = 0.72;
+        this.waveBuf = new Float32Array(this.analyser.fftSize);
+        this.sourceNode.connect(this.analyser).connect(this.actx.destination);
+        this.audio.crossOrigin = "anonymous";
+      }
+    }
+    if (!want && this.sourceNode) {
+      // Once routed, an element can never emit CORS-tainted audio again —
+      // rebuild it so un-probed streams still play.
+      this.audio.pause();
+      this.audio = this.newAudio();
+      this.sourceNode = null;
+      this.analyser = null;
+      this.waveBuf = null;
+    }
+  }
+
   async play(url: string, isHls: boolean): Promise<void> {
     const token = ++this.attempt;
     this.halt();
+    await this.setupRoute(this.wantGraph);
+    if (token !== this.attempt) return;
+    if (this.sourceNode) this.audio.crossOrigin = "anonymous";
     this.live = true;
     this.set("connecting");
     const hlsUrl = isHls || /\.m3u8(\?|$)/i.test(url);
@@ -109,6 +182,7 @@ export class Player {
     this.live = true;
     this.set("connecting");
     this.armStall();
+    if (this.actx?.state === "suspended") void this.actx.resume();
     this.audio.play().catch((e) => {
       if (token === this.attempt && this.live) this.set(this.fail(e));
     });

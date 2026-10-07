@@ -20,7 +20,7 @@ export type TuneResult = {
   origin: GeoPoint;
   antipode: GeoPoint;
   candidates: Station[];
-  land: { country: Country; oceanKm: number | null };
+  land: { country: Country; oceanKm: number | null; point: GeoPoint };
 };
 
 const MIRRORS = [
@@ -213,7 +213,7 @@ export async function resolveSignals(origin: GeoPoint, antipode: GeoPoint): Prom
     origin,
     antipode,
     candidates,
-    land: { country: lands[0].country, oceanKm },
+    land: { country: lands[0].country, oceanKm, point: lands[0].point },
   };
 }
 

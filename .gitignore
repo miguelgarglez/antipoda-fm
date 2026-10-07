@@ -4,3 +4,6 @@ dist/
 .DS_Store
 .vercel
 .env*
+video/raw/
+video/node_modules/
+tsconfig.tsbuildinfo

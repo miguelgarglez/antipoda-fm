@@ -1,0 +1,12 @@
+import { chromium } from "playwright";
+const browser = await chromium.launch();
+const page = await (await browser.newContext({viewport:{width:1440,height:900}})).newPage();
+page.on("console", m => { if (m.type()==="error") console.log("[err]", m.text(), m.location().url); });
+page.on("requestfailed", r => console.log("[reqfail]", r.url(), r.failure()?.errorText));
+page.on("response", r => { if (r.status() >= 400) console.log("[http", r.status()+"]", r.url()); });
+await page.goto("http://localhost:5199/", {waitUntil:"domcontentloaded"});
+await page.waitForTimeout(1500);
+await page.click('button.chip:has-text("Madrid")');
+await page.waitForSelector(".station-name", {timeout:30000});
+await page.waitForTimeout(6000);
+await browser.close();
