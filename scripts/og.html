@@ -1,0 +1,108 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<style>
+  html, body { margin: 0; background: #0a0b10; }
+  canvas { display: block; }
+  @font-face { font-family: PlexMono; src: local("IBM Plex Mono"); }
+</style>
+</head>
+<body>
+<canvas id="c" width="1200" height="630"></canvas>
+<script>
+const c = document.getElementById("c").getContext("2d");
+const INK = "#0A0B10", BONE = "#F2EEE3", SLATE = "#5A6478", ORANGE = "#FF4D00", PHOS = "#7CFFB2";
+const DEG = Math.PI / 180;
+const v3 = (lat, lon) => [Math.cos(lat*DEG)*Math.cos(lon*DEG), Math.cos(lat*DEG)*Math.sin(lon*DEG), Math.sin(lat*DEG)];
+const dot = (a,b)=>a[0]*b[0]+a[1]*b[1]+a[2]*b[2];
+const cross=(a,b)=>[a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]];
+const norm=(v)=>{const l=Math.hypot(...v);return v.map(x=>x/l)};
+const add=(a,b)=>[a[0]+b[0],a[1]+b[1],a[2]+b[2]];
+const scale=(v,s)=>[v[0]*s,v[1]*s,v[2]*s];
+
+c.fillStyle = INK; c.fillRect(0,0,1200,630);
+
+// stars
+let seed = 7;
+const rnd = () => (seed = (seed*16807)%2147483647) / 2147483647;
+for (let i=0;i<220;i++){
+  const x=rnd()*1200, y=rnd()*630;
+  const dx=x-880, dy=y-315;
+  if (dx*dx+dy*dy < 210*210) continue;
+  c.beginPath(); c.arc(x,y,0.5+rnd()*1.1,0,7);
+  c.fillStyle=`rgba(242,238,227,${0.06+rnd()*0.28})`; c.fill();
+}
+
+// globe on the right, chord axis through it
+const cx=880, cy=315, R=215;
+const ax = norm(v3(40.4,-3.7));           // Madrid — the chord axis
+const u0 = norm(cross(ax,[0,0,1]));
+const w0 = cross(ax,u0);
+const th = 0.9;
+const u = norm(add(scale(u0,Math.cos(th)),scale(w0,Math.sin(th))));
+const eR = norm(cross(ax,u)), eU = ax;
+const P = (v)=>({x:cx+dot(v,eR)*R, y:cy-dot(v,eU)*R, z:dot(v,u)});
+
+const ring=(pts,closed,front,style,lw)=>{
+  c.strokeStyle=style;c.lineWidth=lw;c.beginPath();let pen=false;
+  const n=closed?pts.length:pts.length-1;
+  for(let i=0;i<n;i++){
+    const a=P(pts[i]),b=P(pts[(i+1)%pts.length]);
+    const av=front?a.z>0:a.z<=0,bv=front?b.z>0:b.z<=0;
+    const cl=(p,q)=>{const t=p.z/(p.z-q.z);return{x:p.x+(q.x-p.x)*t,y:p.y+(q.y-p.y)*t}};
+    if(av&&bv){if(!pen)c.moveTo(a.x,a.y);c.lineTo(b.x,b.y);pen=true}
+    else if(av&&!bv){if(!pen)c.moveTo(a.x,a.y);const cc=cl(a,b);c.lineTo(cc.x,cc.y);pen=false}
+    else if(!av&&bv){const cc=cl(a,b);c.moveTo(cc.x,cc.y);c.lineTo(b.x,b.y);pen=true}
+    else pen=false;
+  }
+  c.stroke();
+};
+
+c.beginPath();c.arc(cx,cy,R,0,7);c.fillStyle="rgba(242,238,227,0.03)";c.fill();
+c.strokeStyle="rgba(242,238,227,0.5)";c.lineWidth=1.2;c.stroke();
+
+const grat=[];
+for(let lat=-60;lat<=60;lat+=30){const r=[];for(let l=0;l<=360;l+=6)r.push(v3(lat,l));grat.push(r)}
+for(let lon=0;lon<360;lon+=30){const r=[];for(let la=-90;la<=90;la+=6)r.push(v3(la,lon));grat.push(r)}
+grat.forEach(r=>ring(r,false,false,"rgba(242,238,227,0.05)",0.7));
+grat.forEach(r=>ring(r,false,true,"rgba(242,238,227,0.12)",0.8));
+
+fetch("/src/data/coastlines.json").then(r=>r.json()).then(raw=>{
+  const rings = raw.map(r=>r.map(([lon,lat])=>v3(lat,lon)));
+  rings.forEach(r=>ring(r,true,false,"rgba(90,100,120,0.16)",0.8));
+  rings.forEach(r=>ring(r,true,true,"rgba(122,139,168,0.7)",1));
+
+  // chord
+  c.save();c.setLineDash([2,6]);
+  c.strokeStyle=ORANGE;c.lineWidth=6;c.globalAlpha=0.16;
+  c.beginPath();c.moveTo(cx,cy-R);c.lineTo(cx,cy+R);c.stroke();
+  c.lineWidth=1.6;c.globalAlpha=0.9;
+  c.beginPath();c.moveTo(cx,cy-R);c.lineTo(cx,cy+R);c.stroke();c.restore();
+  // markers
+  c.beginPath();c.arc(cx,cy-R,5,0,7);c.fillStyle=BONE;c.fill();
+  c.beginPath();c.arc(cx,cy-R,10,0,7);c.strokeStyle="rgba(242,238,227,0.55)";c.lineWidth=1.2;c.stroke();
+  const g=c.createRadialGradient(cx,cy+R,0,cx,cy+R,26);
+  g.addColorStop(0,"rgba(255,77,0,0.8)");g.addColorStop(1,"rgba(255,77,0,0)");
+  c.beginPath();c.arc(cx,cy+R,26,0,7);c.fillStyle=g;c.fill();
+  c.beginPath();c.arc(cx,cy+R,6,0,7);c.fillStyle=ORANGE;c.fill();
+  c.beginPath();c.arc(cx,cy+R,11,0,7);c.strokeStyle=PHOS;c.globalAlpha=0.85;c.lineWidth=1.2;c.stroke();c.globalAlpha=1;
+
+  // type
+  c.fillStyle=SLATE;c.font="500 19px 'IBM Plex Mono',monospace";
+  c.fillText("A N T Í P O D A . F M", 90, 118);
+  c.fillStyle=BONE;
+  c.font="300 58px 'Fraunces',Georgia,serif";
+  c.fillText("The radio at the other", 86, 252);
+  c.fillText("side of the planet,", 86, 322);
+  c.font="italic 300 58px 'Fraunces',Georgia,serif";
+  c.fillText("playing now.", 86, 392);
+  c.fillStyle=SLATE;c.font="400 20px 'IBM Plex Mono',monospace";
+  c.fillText("one tap · 20,015 km · through the Earth", 90, 470);
+  c.fillStyle=ORANGE;c.font="400 20px 'IBM Plex Mono',monospace";
+  c.fillText("antipoda-fm.vercel.app", 90, 556);
+  window.__done = true;
+});
+</script>
+</body>
+</html>
