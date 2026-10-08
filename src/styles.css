@@ -359,9 +359,15 @@ body {
 
 /* ---- standby: the receiver asleep, inviting the tune ---- */
 
+/* The standby column commits to one left edge — an asymmetric face,
+   not centered copy floating in a left-hand panel. */
 .rx-standby {
-  padding: 22px 20px 16px;
-  text-align: center;
+  padding: 22px 24px 16px;
+  text-align: left;
+}
+
+.rx-standby .lede {
+  margin-left: 0;
 }
 
 .standby-name {
@@ -383,14 +389,15 @@ body {
   max-width: 52ch;
 }
 
-/* The idle control row — place input beside the powered key. */
+/* The idle control row — place input beside the powered key, on the
+   same left edge as the words above it. */
 .rx-actions {
   display: flex;
   flex-wrap: wrap;
   gap: 16px 20px;
   align-items: end;
-  justify-content: center;
-  padding: 0 20px 6px;
+  justify-content: flex-start;
+  padding: 0 24px 6px;
 }
 
 .actions {
@@ -504,19 +511,23 @@ input:focus-visible,
   background: rgba(242, 238, 227, 0.08);
 }
 
-/* Starting points as a sentence of links, not a row of capsules. */
+/* Starting points as independent links — no orphaned separators when
+   the row wraps on a narrow screen. */
 .quick {
-  margin: 20px 0 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  align-items: baseline;
+  margin: 8px 0 0;
   font-family: var(--disp);
   font-size: 13px;
   letter-spacing: 0.01em;
   color: var(--slate-2);
-  line-height: 2;
+  line-height: 1.9;
 }
 
-.quick-sep {
-  margin: 0 9px;
-  color: rgba(90, 100, 120, 0.7);
+.quick-lead {
+  color: var(--slate);
 }
 
 .place-link {
@@ -756,7 +767,8 @@ input:focus-visible,
 /* The strip is reserved even when empty — content swaps in place, the
    instrument never shifts. */
 .scope-note.off,
-.rx-hint.off {
+.rx-hint.off,
+.well-legend.off {
   visibility: hidden;
 }
 
@@ -795,25 +807,26 @@ input:focus-visible,
   outline-offset: 4px;
 }
 
+/* Step keys read as keys — a framed affordance beside the strip, not a
+   stray chevron. */
 .dial-step {
   flex: none;
-  width: 46px;
+  align-self: center;
+  width: 40px;
+  height: 36px;
+  margin: 0 6px;
   font-family: var(--disp);
-  font-size: 19px;
+  font-size: 17px;
   line-height: 1;
   color: var(--slate-2);
-  background: none;
-  border: 0;
-  border-right: 1px solid rgba(242, 238, 227, 0.08);
+  background: rgba(242, 238, 227, 0.03);
+  border: 1px solid rgba(90, 100, 120, 0.5);
+  border-radius: 3px;
   cursor: pointer;
   transition:
     color 100ms ease,
-    background-color 100ms ease;
-}
-
-.dial-step:last-child {
-  border-right: 0;
-  border-left: 1px solid rgba(242, 238, 227, 0.08);
+    background-color 100ms ease,
+    transform 80ms ease;
 }
 
 @media (hover: hover) and (pointer: fine) {
@@ -826,6 +839,7 @@ input:focus-visible,
 .dial-step:active:not(:disabled) {
   color: var(--phosphor);
   background: rgba(124, 255, 178, 0.07);
+  transform: scale(0.94);
 }
 
 .dial-step:disabled {
@@ -1025,11 +1039,17 @@ input:focus-visible,
     order: 0;
     padding: 12px 8px 4px;
   }
-  .well-legend {
-    display: none; /* the porthole column stays compact on a phone */
-  }
+  /* The marker key matters most on a small screen — the pip and the
+     crosshair sit closer there. The porthole shrinks to pay for it. */
   .well-disc {
-    width: min(46vw, 190px);
+    width: min(40vw, 150px);
+  }
+  .well-legend {
+    margin: 4px 0 0;
+  }
+  .dial-step {
+    width: 44px;
+    height: 44px;
   }
   /* Captions live in the flow below the window — the destination is
      content, not chrome, and must survive the small canvas. */
@@ -1142,13 +1162,17 @@ input:focus-visible,
     font-size: 10px;
   }
   .rx-masthead {
-    padding: 6px 12px;
+    padding: 4px 12px;
   }
   .rx-head {
-    padding: 6px 12px;
+    padding: 4px 12px;
   }
   .rx-plate {
-    padding: 6px 16px 5px;
+    padding: 4px 16px 3px;
+  }
+  .rx-meta {
+    font-size: 12.5px;
+    margin-top: 2px;
   }
   .hero {
     gap: 6px;
@@ -1173,13 +1197,25 @@ input:focus-visible,
     padding: 5px 0 4px;
   }
   .scope {
-    height: 50px;
+    height: 44px;
+  }
+  .well-legend {
+    font-size: 10px;
+    margin-top: 2px;
+  }
+  .dial-step {
+    width: 40px;
+    height: 40px;
   }
   .rx-foot {
-    padding: 5px 16px 6px;
+    padding: 4px 16px 4px;
+    gap: 2px;
+  }
+  .rx-foot .note {
+    font-size: 12.5px;
   }
   .rx-hint {
-    padding: 2px 16px 6px;
+    padding: 1px 16px 4px;
   }
   .bore-readout {
     min-height: 42px;

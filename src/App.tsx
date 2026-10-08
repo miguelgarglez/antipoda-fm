@@ -583,8 +583,13 @@ export default function App() {
               )}
             </div>
           )}
-          {phase === "tuned" && (
-            <p className="well-legend" aria-hidden="true">
+          {/* The marker key is reserved from the start of the hunt —
+              mounting it only on arrival was the chassis growth. */}
+          {phase !== "idle" && (
+            <p
+              className={`well-legend${phase === "tuned" ? "" : " off"}`}
+              aria-hidden="true"
+            >
               <span className="lg-anti">◌</span> exact point ·{" "}
               <span className="lg-stn">●</span> station
             </p>
@@ -777,7 +782,8 @@ export default function App() {
                   {station.country || "somewhere far away"}
                   {offPointKm !== null &&
                     ` · ${formatKm(offPointKm)} from the point`}
-                  {stationKm !== null && ` · ≈${formatKm(stationKm)} overland`}
+                  {stationKm !== null &&
+                    ` · ≈${formatKm(stationKm)} around Earth’s surface`}
                 </p>
                 {(station.codec || station.language) && (
                   <p className="rx-tech">
@@ -892,13 +898,19 @@ export default function App() {
                     ›
                   </button>
                 </div>
-                {/* Reserved strip — the whisper swaps in and out without
-                    moving the dial or the foot. */}
+                {/* Reserved strip — one status slot beside the dial:
+                    the lesson, then the consequence of what you hold. */}
                 <p
-                  className={`rx-hint${phase === "tuned" && playing && !dialTouched && !guideOn ? "" : " off"}`}
+                  className={`rx-hint${phase === "tuned" && playing && !guideOn ? "" : " off"}`}
                   role="status"
                 >
-                  each notch is another station — drag the strip
+                  {previewIx >= 0 && candidatesRef.current[previewIx]
+                    ? `release for ${previewIx + 1} · ${candidatesRef.current[previewIx].name}`
+                    : !dialTouched
+                      ? "each notch is another station — drag the strip"
+                      : station
+                        ? `playing ${stationIx + 1} · ${station.name}`
+                        : "each notch is another station — drag the strip"}
                 </p>
               </>
             )}
@@ -910,17 +922,15 @@ export default function App() {
                 {phase === "idle" && (
                   <>
                     <p className="quick">
-                      try{" "}
-                      {QUICK_PLACES.map((q, i) => (
-                        <span key={q}>
-                          {i > 0 && <span className="quick-sep">·</span>}
-                          <button
-                            className="place-link"
-                            onClick={() => quickPlace(q)}
-                          >
-                            {q}
-                          </button>
-                        </span>
+                      <span className="quick-lead">try</span>
+                      {QUICK_PLACES.map((q) => (
+                        <button
+                          key={q}
+                          className="place-link"
+                          onClick={() => quickPlace(q)}
+                        >
+                          {q}
+                        </button>
                       ))}
                     </p>
                     {geoDenied && (
