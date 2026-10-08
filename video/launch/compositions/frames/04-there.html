@@ -1,0 +1,177 @@
+<template>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link
+    href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..900;1,9..144,300..900&family=IBM+Plex+Mono:wght@400;500&display=swap"
+    rel="stylesheet"
+  />
+  <script src="https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"></script>
+  <style>
+    /*
+      Frame 4 — The other side answers (04-there) · 1920×1080 · 5.4s · dark register.
+      The footage leads: session-1080.mp4 media 14.6s→20s full-bleed — the camera
+      swing lands on the antipode, the product's own ON AIR dot + station card
+      carry the arrival. Sole overlay: one Fraunces italic cream line, right side,
+      in at 1.2s, out over the last 0.5s. Authored ids are prefixed 04-there- and
+      selected via [id="…"] (digit-leading idents aren't valid bare CSS selectors).
+    */
+    #root {
+      position: absolute;
+      inset: 0;
+      width: 1920px;
+      height: 1080px;
+      overflow: hidden;
+      container-type: size;
+      font-family: "Fraunces", serif;
+      color: #f2eee3;
+    }
+    #root .clip {
+      position: absolute;
+      inset: 0;
+    }
+
+    /* full-bleed ink ground — lowest track, under the hoisted footage */
+    #root [id="04-there-bg"] {
+      background: #0a0b10;
+    }
+
+    /* frame-local fill for standalone preview; the assembler restyles the
+       hoisted <video> from data-frame-video-* geometry, so these never cross */
+    #root [id="04-there-video"] {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+    }
+
+    /* quiet legibility veil on the right half where the line sits — fades in
+       just ahead of the type, keeps the station card readable */
+    #root [id="04-there-scrim"] {
+      background: linear-gradient(
+        to left,
+        rgba(10, 11, 16, 0.58) 0%,
+        rgba(10, 11, 16, 0.26) 30%,
+        rgba(10, 11, 16, 0) 52%
+      );
+    }
+
+    #root [id="04-there-copy-inner"] {
+      position: absolute;
+      right: 106px; /* pad-x 5.5cqw */
+      top: 406px;
+    }
+    #root [id="04-there-rule"] {
+      width: 36px;
+      height: 2px;
+      background: #ff4d00;
+      margin-bottom: 24px;
+      transform-origin: left center;
+    }
+    #root [id="04-there-line"] {
+      margin: 0;
+      font-family: "Fraunces", Georgia, serif;
+      font-style: italic;
+      font-weight: 500;
+      font-size: 56px;
+      line-height: 1.18;
+      letter-spacing: -0.01em;
+      color: #f2eee3;
+    }
+  </style>
+
+  <div
+    id="root"
+    data-composition-id="04-there"
+    data-start="0"
+    data-duration="5.4"
+    data-width="1920"
+    data-height="1080"
+  >
+    <!-- track 0 — full-bleed ink ground (sits under the hoisted footage) -->
+    <div
+      id="04-there-bg"
+      class="clip"
+      data-start="0"
+      data-duration="5.4"
+      data-track-index="0"
+    ></div>
+
+    <!-- track 1 — approved footage, media 14.6s→20s, full frame 1920×1080 cover -->
+    <video
+      id="04-there-video"
+      class="clip"
+      data-frame-video="approved"
+      data-frame-video-x="0"
+      data-frame-video-y="0"
+      data-frame-video-width="1920"
+      data-frame-video-height="1080"
+      data-frame-video-fit="cover"
+      src="assets/session-1080.mp4"
+      preload="auto"
+      muted
+      playsinline
+      data-start="0"
+      data-duration="5.4"
+      data-media-start="14.6"
+      data-track-index="1"
+    ></video>
+
+    <!-- track 2 — right-side legibility veil, windowed with the type -->
+    <div
+      id="04-there-scrim"
+      class="clip"
+      data-start="0.9"
+      data-duration="4.5"
+      data-track-index="2"
+    ></div>
+
+    <!-- track 3 — arrival line, right side, windowed 1.2s→5.4s -->
+    <div
+      id="04-there-copy"
+      class="clip"
+      data-start="1.2"
+      data-duration="4.2"
+      data-track-index="3"
+    >
+      <div id="04-there-copy-inner">
+        <div id="04-there-rule"></div>
+        <p id="04-there-line">the live station<br />nearest your antipode</p>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    (function () {
+      window.__timelines = window.__timelines || {};
+      var tl = gsap.timeline({ paused: true });
+
+      var scrim = document.getElementById("04-there-scrim");
+      var copy = document.getElementById("04-there-copy-inner");
+      var rule = document.getElementById("04-there-rule");
+
+      // veil settles in just ahead of the line so type lands on a quieted field
+      tl.fromTo(scrim, { opacity: 0 }, { opacity: 1, duration: 0.8, ease: "power1.inOut" }, 0.9);
+
+      // 1.2s — the reveal swing lands on the antipode: the line rises in
+      tl.fromTo(
+        copy,
+        { opacity: 0, y: 26 },
+        { opacity: 1, y: 0, duration: 0.95, ease: "power3.out" },
+        1.2,
+      );
+
+      // the 36×2 stub rule draws in as the rise completes — the frame's only ornament
+      tl.fromTo(rule, { scaleX: 0 }, { scaleX: 1, duration: 0.5, ease: "power2.inOut" }, 1.6);
+
+      // holds through the ON AIR settle; fades over the last 0.5s (-0.5s cue)
+      tl.to(copy, { opacity: 0, duration: 0.5, ease: "power1.in" }, 4.9);
+      tl.to(scrim, { opacity: 0, duration: 0.5, ease: "power1.in" }, 4.9);
+
+      // span anchor — the shot runs the whole 5.4s on the footage
+      tl.to({}, { duration: 5.4 }, 0);
+
+      window.__timelines["04-there"] = tl;
+      tl.seek(0);
+    })();
+  </script>
+</template>

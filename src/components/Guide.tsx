@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 
 const KEY = "antipoda.guide.v2";
 
@@ -21,7 +22,7 @@ export function markGuideSeen() {
 type Step = {
   sel: string;
   text: string;
-  /** ms before the step lets go on its own — the guide never traps */
+  /** ms before the step gives up quietly — dismissal, not advancement */
   timeout: number;
   onlyPhase?: string;
   /** place the tip above the target when what sits below are controls */
@@ -32,6 +33,8 @@ type Step = {
   belowAfter?: string;
   /** ring the planet with two curved marks on its limb, not a rectangle */
   ring?: "rect" | "arc";
+  /** render as a slim row inside .dial-lesson-slot instead of a floating card */
+  inline?: boolean;
 };
 
 const STEPS: Step[] = [
@@ -48,14 +51,14 @@ const STEPS: Step[] = [
     text: "Name a place, or press the orange key — the planet will open.",
     timeout: 15000,
     onlyPhase: "idle",
-    belowAfter: ".quick", // the chips are this step's controls — clear them
+    belowAfter: ".quick", // the place links are this step's controls — clear them
   },
   {
     sel: ".dial",
-    text: "Each notch is another station. Drag to listen.",
-    timeout: 12000,
+    text: "Each notch is another station — drag to listen.",
+    timeout: 14000,
     onlyPhase: "tuned",
-    above: true, // the transport row below the dial is the app's controls
+    inline: true, // in-flow above the dial — never floats over the transport
   },
 ];
 
@@ -63,17 +66,22 @@ type Props = {
   phase: string;
   globeTouched: boolean;
   dialTouched: boolean;
-  onDone: () => void;
+  /** learned=false means the guide bowed out unseen — keep the quiet hint */
+  onDone: (learned: boolean) => void;
 };
 
 /**
  * First-run guide: two or three contextual steps on the real UI. Each step
- * rings one control and waits for the visitor to do the thing — a grab, a
- * tune, a dial drag — or lets go on its own after a few seconds. Skippable,
+ * marks one control and waits for the visitor to do the thing — a grab, a
+ * tune, a dial drag. A step that times out collapses the guide back to the
+ * quiet "drag to turn" hint rather than marching on by itself. Skippable,
  * remembered in localStorage, replayable from the "?" in the header.
  */
 export function Guide({ phase, globeTouched, dialTouched, onDone }: Props) {
   const [ix, setIx] = useState(0);
+  // A beat of quiet before the full lesson appears — the planet alone is
+  // the first impression; a small "drag to turn" pill bridges the wait.
+  const [booted, setBooted] = useState(false);
   // The tracked rect is tagged with the step it was measured for — without
   // the tag a step change reads the old target's rect for one frame and a
   // hidden step's leash timer would arm anyway.
@@ -82,20 +90,36 @@ export function Guide({ phase, globeTouched, dialTouched, onDone }: Props) {
   );
   const done = useRef(false);
   const tipRef = useRef<HTMLDivElement>(null);
+  const learnedRef = useRef(false);
+  learnedRef.current = globeTouched || ix > 0;
 
   const finish = () => {
     if (done.current) return;
     done.current = true;
     markGuideSeen();
-    onDone();
+    onDone(true); // opted out or completed — suppress the quiet hint
+  };
+  const bowOut = () => {
+    if (done.current) return;
+    done.current = true;
+    markGuideSeen();
+    // A timeout is dismissal, not failure — the hint survives only if the
+    // visitor genuinely never touched the planet.
+    onDone(learnedRef.current);
   };
 
   // Absolute leash: however the steps stall (an idle visitor, a target
   // that never appears), the guide bows out within a minute.
   useEffect(() => {
-    const t = setTimeout(finish, 60_000);
+    const t = setTimeout(bowOut, 60_000);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // The full lesson holds back for a breath — first the mini annotation.
+  useEffect(() => {
+    const t = setTimeout(() => setBooted(true), 1500);
+    return () => clearTimeout(t);
   }, []);
 
   // The real actions advance the guide. A completed tune while the guide
@@ -108,20 +132,17 @@ export function Guide({ phase, globeTouched, dialTouched, onDone }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [phase, globeTouched, dialTouched, ix]);
 
-  // Per-step leash: if the visitor just watches, the step bows out. The
-  // clock runs only while the step's target is actually on screen — a
-  // step waiting for a phase (the dial needs "tuned") stays patient.
+  // Per-step leash: if the visitor just watches, the guide collapses to
+  // the quiet hint — it never advances on a clock alone. The clock runs
+  // only while the step's target is actually on screen.
   const rect = view && view.ix === ix ? view : null;
   const visible = rect !== null;
   useEffect(() => {
-    if (done.current || !visible) return;
-    const t = setTimeout(() => {
-      if (ix >= STEPS.length - 1) finish();
-      else setIx(ix + 1);
-    }, STEPS[ix].timeout);
+    if (done.current || !visible || !booted) return;
+    const t = setTimeout(bowOut, STEPS[ix].timeout);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ix, visible]);
+  }, [ix, visible, booted]);
 
   // Track the target rect every frame — the stage resizes between phases.
   useEffect(() => {
@@ -143,6 +164,19 @@ export function Guide({ phase, globeTouched, dialTouched, onDone }: Props) {
   }, [ix, phase]);
 
   if (done.current) return null;
+
+  // The bridging annotation: a small pill inside the stage's lower edge.
+  if (!booted) {
+    return rect ? (
+      <div
+        className="guide-mini"
+        style={{ left: rect.x + rect.w / 2, top: rect.y + rect.h - 30 }}
+      >
+        drag to turn
+      </div>
+    ) : null;
+  }
+
   const step = STEPS[ix];
   if (!step) return null;
 
@@ -169,6 +203,8 @@ export function Guide({ phase, globeTouched, dialTouched, onDone }: Props) {
         ? Math.max(12, rect.y - 14 - tipH)
         : below;
 
+  const slot = step.inline ? document.querySelector(".dial-lesson-slot") : null;
+
   return (
     <div className="guide">
       {rect && step.ring === "arc" ? (
@@ -186,19 +222,32 @@ export function Guide({ phase, globeTouched, dialTouched, onDone }: Props) {
           />
         )
       )}
-      {rect && (
-        <div
-          ref={tipRef}
-          className="guide-tip"
-          style={{ left: tipX, top: tipY, width: tipW }}
-          role="status"
-        >
-          <span className="guide-step">step {ix + 1} of {STEPS.length}</span>
-          <p>{step.text}</p>
-          <button className="guide-skip" onClick={finish}>
-            skip
-          </button>
-        </div>
+      {rect && slot ? (
+        createPortal(
+          <div className="guide-row" role="status">
+            <span className="guide-row-dot" aria-hidden="true" />
+            <p>{step.text}</p>
+            <button className="guide-skip" onClick={finish}>
+              skip
+            </button>
+          </div>,
+          slot,
+        )
+      ) : (
+        rect && (
+          <div
+            ref={tipRef}
+            className="guide-tip"
+            style={{ left: tipX, top: tipY, width: tipW }}
+            role="status"
+          >
+            <span className="guide-step">step {ix + 1} of {STEPS.length}</span>
+            <p>{step.text}</p>
+            <button className="guide-skip" onClick={finish}>
+              skip
+            </button>
+          </div>
+        )
       )}
       {!rect && (
         <button className="guide-skip guide-skip-floating" onClick={finish}>
@@ -213,13 +262,14 @@ const clamp = (x: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, x
 
 /**
  * Two curved marks on the planet's limb — a ring that belongs to a body,
- * not a dashed rectangle around a UI region. The circle inscribed in the
- * stage rect is the planet; the chevrons read as rotation.
+ * not a dashed rectangle around a UI region. The planet renders at 0.4×
+ * the stage's short side at idle zoom, so the arcs hug the disc itself
+ * plus a breath of clearance; the chevrons read as rotation.
  */
 function GuideArc({ rect }: { rect: { x: number; y: number; w: number; h: number } }) {
   const cx = rect.x + rect.w / 2;
   const cy = rect.y + rect.h / 2;
-  const r = Math.min(rect.w, rect.h) / 2 - 3;
+  const r = Math.min(rect.w, rect.h) * 0.4 + 14;
   const arc = (a0: number, a1: number) => {
     const p = (a: number) => `${cx + r * Math.cos(a)} ${cy + r * Math.sin(a)}`;
     return `M ${p(a0)} A ${r} ${r} 0 0 1 ${p(a1)}`;

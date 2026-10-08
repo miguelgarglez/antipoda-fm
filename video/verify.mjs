@@ -13,10 +13,11 @@ page.on("console", (m) => {
 page.on("pageerror", (e) => errors.push(`[pageerror] ${e.message}`));
 
 await page.goto(URL + (URL.includes("?") ? "&" : "?") + "gvdbg", { waitUntil: "domcontentloaded" });
-await page.waitForTimeout(1800);
+await page.waitForTimeout(2400);
 await page.screenshot({ path: `${OUT}/01-idle-1440.png` });
 
-// --- guide: step 1 should ring the planet on a first visit ---
+// --- guide: step 1 should ring the planet on a first visit (after the
+//     1.5s quiet beat — the mini pill bridges before the tip appears) ---
 const guideStep1 = await page.locator(".guide-step").textContent().catch(() => null);
 console.log("guide step:", guideStep1);
 
@@ -89,7 +90,8 @@ await page.waitForFunction(
 );
 await page.waitForTimeout(1800);
 await page.screenshot({ path: `${OUT}/04-tuned-1440.png` });
-const guideStep3 = await page.locator(".guide-step").textContent().catch(() => null);
+// step 3 renders as the in-flow .guide-row above the dial, not a card
+const guideStep3 = await page.locator(".guide-row p, .guide-step").first().textContent().catch(() => null);
 console.log("guide at tuned:", guideStep3);
 
 // --- dial drag interaction finishes the guide ---

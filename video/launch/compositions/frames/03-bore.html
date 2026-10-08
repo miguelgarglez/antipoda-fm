@@ -1,0 +1,165 @@
+<template>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link
+    href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400..900;1,9..144,400..900&family=IBM+Plex+Mono:wght@400;500;600&display=swap"
+    rel="stylesheet"
+  />
+  <script src="https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"></script>
+
+  <style>
+    /*
+      Frame 3 — Through the planet (03-bore) · 1920×1080 · 6s · dark register.
+      The footage leads: session-1080.mp4 media 8.6s→14.6s full-bleed — the planet
+      splits molten, the probe crosses the core, the km counter runs in-video.
+      Sole overlay: one phosphor mono label, top-center, in at 2.2s, out at 5.5s.
+      Authored ids/classes are prefixed 03-bore- and selected via [id="…"]
+      (digit-leading idents aren't valid bare CSS selectors).
+    */
+    #root {
+      position: absolute;
+      inset: 0;
+      width: 1920px;
+      height: 1080px;
+      overflow: hidden;
+      container-type: size;
+      font-family: "Fraunces", serif;
+      color: #f2eee3;
+    }
+    #root .clip {
+      position: absolute;
+      inset: 0;
+    }
+
+    /* full-bleed ground — ink-black field under the footage */
+    [id="03-bore-bg"] {
+      background: #0a0b10;
+    }
+
+    /* frame-local fill for standalone preview; the assembler restyles the
+       hoisted <video> from data-frame-video-* geometry, so these never cross */
+    [id="03-bore-video"] {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+    }
+
+    [id="03-bore-label"] {
+      pointer-events: none;
+    }
+    [id="03-bore-label-row"] {
+      position: absolute;
+      top: 96px;
+      left: 0;
+      right: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 22px;
+    }
+    /* phosphor hairline ticks flanking the readout — same hue, recessed.
+       Base opacity 0: the timeline owns the reveal (fromTo at 2.35s). */
+    [id="03-bore-label-row"] [class~="03-bore-tick"] {
+      width: 48px;
+      height: 1px;
+      background: #7cffb2;
+      opacity: 0;
+    }
+    [id="03-bore-label-text"] {
+      font-family: "IBM Plex Mono", ui-monospace, monospace;
+      font-weight: 500;
+      font-size: 26px;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: #7cffb2;
+      white-space: nowrap;
+    }
+  </style>
+
+  <div
+    id="root"
+    data-composition-id="03-bore"
+    data-width="1920"
+    data-height="1080"
+    data-start="0"
+    data-duration="6"
+  >
+    <!-- track 0 — full-bleed ink ground (sits under the hoisted footage) -->
+    <div
+      id="03-bore-bg"
+      class="clip"
+      data-start="0"
+      data-duration="6"
+      data-track-index="0"
+    ></div>
+
+    <!-- track 1 — approved footage, media 8.6s→14.6s, full frame 1920×1080 cover -->
+    <video
+      id="03-bore-video"
+      class="clip"
+      data-frame-video="approved"
+      data-frame-video-x="0"
+      data-frame-video-y="0"
+      data-frame-video-width="1920"
+      data-frame-video-height="1080"
+      data-frame-video-fit="cover"
+      src="assets/session-1080.mp4"
+      preload="auto"
+      muted
+      playsinline
+      data-start="0"
+      data-duration="6"
+      data-media-start="8.6"
+      data-track-index="1"
+    ></video>
+
+    <!-- track 2 — phosphor mono readout, top-center, windowed 2.2s→6.0s -->
+    <div
+      id="03-bore-label"
+      class="clip"
+      data-start="2.2"
+      data-duration="3.8"
+      data-track-index="2"
+    >
+      <div id="03-bore-label-row">
+        <span class="03-bore-tick" aria-hidden="true"></span>
+        <span id="03-bore-label-text">12,742 km through the planet</span>
+        <span class="03-bore-tick" aria-hidden="true"></span>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    (function () {
+      window.__timelines = window.__timelines || {};
+      var tl = gsap.timeline({ paused: true });
+
+      var label = document.getElementById("03-bore-label-text");
+      var ticks = document.querySelectorAll('[class~="03-bore-tick"]');
+
+      // 2.2s — the planet opens: readout tracks in (mono tracking settle, seek-safe)
+      tl.fromTo(
+        label,
+        { opacity: 0, y: -8, scale: 1.04 },
+        { opacity: 1, y: 0, scale: 1, duration: 0.9, ease: "power2.out" },
+        2.2,
+      );
+      tl.fromTo(
+        ticks,
+        { opacity: 0, scaleX: 0 },
+        { opacity: 0.35, scaleX: 1, duration: 0.7, ease: "power2.out" },
+        2.35,
+      );
+
+      // holds through the crossing; fades as the exit flare lands (-0.5s)
+      tl.to(label, { opacity: 0, duration: 0.5, ease: "power1.in" }, 5.5);
+      tl.to(ticks, { opacity: 0, duration: 0.5, ease: "power1.in" }, 5.5);
+
+      // full-span anchor — the shot runs the whole 6s on the footage
+      tl.to({}, { duration: 6 }, 0);
+
+      window.__timelines["03-bore"] = tl;
+    })();
+  </script>
+</template>

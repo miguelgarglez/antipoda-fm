@@ -44,6 +44,7 @@ export function Dial({ count, index, sweeping, live, onSelect, onMove, onLock, l
     clickBurst: 0, // staggered detent clicks queued this gesture
     burstT: [] as number[], // their timer ids — cleared on cancel/unmount
     lastT: 0, // frame clock for dt-normalized physics
+    acc: 0, // pending seconds for the fixed-substep spring solver
     live,
   });
   st.current.count = count;
@@ -123,12 +124,17 @@ export function Dial({ count, index, sweeping, live, onSelect, onMove, onLock, l
       s.v = 0;
       s.x += (target - s.x) * Math.min(1, (s.sweeping ? 0.06 : 0.5) * dt);
     } else {
-      // Damped spring — glide with a hair of overshoot. Velocity is in
-      // px-per-frame and the position step scales by dt too, so the same
-      // gesture settles identically at 30/60/120Hz.
-      s.v += (target - s.x) * 0.16 * dt;
-      s.v *= Math.pow(0.78, dt);
-      s.x += s.v * dt;
+      // Damped spring on fixed 1/120s substeps — the same glide and hair
+      // of overshoot at every refresh rate, not a per-frame approximation
+      // whose overshoot drifts with dt. dt is in 60fps-frame units, so
+      // dt/60 is the pending time in seconds (capped against tab stalls).
+      s.acc = Math.min(0.1, s.acc + dt / 60);
+      while (s.acc >= 1 / 120) {
+        s.v += (target - s.x) * 0.08;
+        s.v *= 0.883;
+        s.x += s.v * 0.5;
+        s.acc -= 1 / 120;
+      }
     }
     const speed = Math.abs(target - s.x) + Math.abs(s.v);
     const wasSettled = s.settled;

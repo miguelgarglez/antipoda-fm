@@ -1,0 +1,171 @@
+<template>
+  <link
+    rel="stylesheet"
+    href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400..900;1,9..144,400..900&family=IBM+Plex+Mono:wght@400;500&display=swap"
+  />
+  <script src="https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"></script>
+  <style>
+    #root {
+      position: relative;
+      width: 1920px;
+      height: 1080px;
+      overflow: hidden;
+      container-type: size;
+      font-family: "Fraunces", serif;
+    }
+    .clip {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+    }
+    .url5-bg {
+      background: #0a0b10;
+    }
+    video.clip {
+      object-fit: cover;
+    }
+    /* edge vignette — footage grade, darkens edges toward 0.55 ink */
+    .url5-vignette {
+      background: radial-gradient(
+        ellipse 118% 118% at 50% 50%,
+        rgba(10, 11, 16, 0) 44%,
+        rgba(10, 11, 16, 0.55) 100%
+      );
+    }
+    /* soft scrim seated behind the URL block, fades in just ahead of it */
+    .url5-scrim {
+      background: radial-gradient(
+        ellipse 52% 26% at 50% 47%,
+        rgba(10, 11, 16, 0.55) 0%,
+        rgba(10, 11, 16, 0) 72%
+      );
+    }
+    .url5-type {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding-bottom: 72px; /* optical center, well above the caption keep-out */
+      text-align: center;
+      font-family: "IBM Plex Mono", ui-monospace, monospace;
+    }
+    .url5-label {
+      display: flex;
+      align-items: center;
+      font-size: 15px;
+      font-weight: 500;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: rgba(242, 238, 227, 0.72);
+      margin-bottom: 22px;
+    }
+    .url5-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #7cffb2;
+      margin-right: 14px;
+    }
+    .url5-url {
+      font-size: 40px;
+      font-weight: 500;
+      letter-spacing: 0.12em;
+      color: #f2eee3;
+      line-height: 1.2;
+      white-space: nowrap;
+    }
+    .url5-rule {
+      width: calc(100% - 0.12em);
+      height: 2px;
+      background: #ff4d00;
+      margin-top: 16px;
+      transform-origin: left center;
+    }
+  </style>
+  <div
+    id="root"
+    data-composition-id="05-url"
+    data-start="0"
+    data-duration="9.2"
+    data-width="1920"
+    data-height="1080"
+  >
+    <div class="clip url5-bg" data-start="0" data-duration="9.2" data-track-index="0"></div>
+    <video
+      id="url5-video"
+      class="clip"
+      data-frame-video="approved"
+      data-start="0"
+      data-duration="9.2"
+      data-track-index="0"
+      data-frame-video-x="0"
+      data-frame-video-y="0"
+      data-frame-video-width="1920"
+      data-frame-video-height="1080"
+      data-frame-video-fit="cover"
+      data-media-start="20"
+      src="assets/session-1080.mp4"
+      muted
+      playsinline
+      preload="auto"
+    ></video>
+    <div class="clip url5-vignette" data-start="0" data-duration="9.2" data-track-index="1"></div>
+    <div class="clip url5-scrim" data-start="0" data-duration="9.2" data-track-index="1"></div>
+    <div class="clip url5-type" data-start="0" data-duration="9.2" data-track-index="2">
+      <div class="url5-label"><span class="url5-dot"></span>live radio · the far side of you</div>
+      <div class="url5-urlwrap">
+        <div class="url5-url">antipoda-fm.vercel.app</div>
+        <div class="url5-rule"></div>
+      </div>
+    </div>
+  </div>
+  <script>
+    window.__timelines = window.__timelines || {};
+    const tl = gsap.timeline({ paused: true });
+    window.__timelines["05-url"] = tl;
+
+    // Grade settles in gently over the cut; the footage itself carries t=0→5.5s
+    // (dial drag / retune around media 20–23s).
+    tl.fromTo(
+      "[class~=\"url5-vignette\"]",
+      { opacity: 0.25 },
+      { opacity: 1, duration: 1.6, ease: "power1.out" },
+      0,
+    );
+
+    // Scrim blooms behind the type zone just ahead of the URL landing.
+    tl.fromTo(
+      "[class~=\"url5-scrim\"]",
+      { opacity: 0 },
+      { opacity: 1, duration: 1.1, ease: "power1.inOut" },
+      4.7,
+    );
+
+    // 5.3s — small mono label drifts up first.
+    tl.fromTo(
+      "[class~=\"url5-label\"]",
+      { opacity: 0, y: 12 },
+      { opacity: 1, y: 0, duration: 0.55, ease: "power2.out" },
+      5.3,
+    );
+
+    // 5.5s — the URL rises in center.
+    tl.fromTo(
+      "[class~=\"url5-url\"]",
+      { opacity: 0, y: 18 },
+      { opacity: 1, y: 0, duration: 0.65, ease: "power3.out" },
+      5.5,
+    );
+
+    // Signal-orange rule draws left→right over 400ms as the rise completes.
+    tl.fromTo(
+      "[class~=\"url5-rule\"]",
+      { scaleX: 0 },
+      { scaleX: 1, duration: 0.4, ease: "power2.inOut" },
+      5.95,
+    );
+
+    tl.seek(0);
+  </script>
+</template>

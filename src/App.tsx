@@ -35,6 +35,7 @@ export default function App() {
   const [connecting, setConnecting] = useState(false);
   const [failMsg, setFailMsg] = useState("");
   const [copied, setCopied] = useState(false);
+  const [copyFailed, setCopyFailed] = useState(false);
   const [geoDenied, setGeoDenied] = useState(false);
   const [query, setQuery] = useState("");
   const [places, setPlaces] = useState<Place[]>([]);
@@ -64,6 +65,7 @@ export default function App() {
 
   const placeInputRef = useRef<HTMLInputElement>(null);
   const playBtnRef = useRef<HTMLButtonElement>(null);
+  const dialGrabX = useRef<number | null>(null);
   const failBtnRef = useRef<HTMLButtonElement>(null);
 
   phaseRef.current = phase;
@@ -418,7 +420,9 @@ export default function App() {
       setCopied(true);
       setTimeout(() => setCopied(false), 1600);
     } catch {
-      setCopied(false);
+      // denied clipboard (non-secure embed, permission) — say so, not silent
+      setCopyFailed(true);
+      setTimeout(() => setCopyFailed(false), 2200);
     }
   };
 
@@ -456,7 +460,6 @@ export default function App() {
         {liveMsg}
       </p>
       <header className="top">
-        <div className="wordmark">ANTÍPODA.FM</div>
         <div className="top-right">
           <button
             className={`snd ${snd ? "on" : ""}`}
@@ -505,6 +508,7 @@ export default function App() {
             onBoreComplete={onBoreComplete}
             onInteract={() => setGlobeTouched(true)}
           />
+          <span className="stage-tag">antípoda.fm</span>
           {phase !== "idle" && (
             <div className="dial-caption" aria-hidden="true">
               {/* Mount from the start of tuning — the rows exist before
@@ -684,7 +688,25 @@ export default function App() {
                   carrier live — this stream can’t feed the meter
                 </p>
               )}
-              <div onPointerDownCapture={() => setDialTouched(true)}>
+              <div className="dial-lesson-slot" />
+              <div
+                onPointerDownCapture={(e) => {
+                  dialGrabX.current = e.clientX;
+                }}
+                onPointerMoveCapture={(e) => {
+                  // the lesson completes on real travel, not a resting thumb
+                  if (dialGrabX.current !== null && Math.abs(e.clientX - dialGrabX.current) > 12) {
+                    dialGrabX.current = null;
+                    setDialTouched(true);
+                  }
+                }}
+                onPointerUpCapture={() => {
+                  dialGrabX.current = null;
+                }}
+                onPointerCancelCapture={() => {
+                  dialGrabX.current = null;
+                }}
+              >
                 <Dial
                   count={candidatesRef.current.length}
                   index={stationIx}
@@ -705,7 +727,7 @@ export default function App() {
                   the point
                 </p>
               ) : (
-                <p className="note">
+                <p className="note anti-coord">
                   antipode {formatCoord(tune.antipode)} · {tune.land.country.name}
                 </p>
               )}
@@ -747,10 +769,12 @@ export default function App() {
                   )}
                 </button>
                 <button
-                  className="icon-btn"
+                  className={`icon-btn${copyFailed ? " bad" : ""}`}
                   onClick={copyLink}
-                  aria-label={copied ? "Link copied" : "Copy a link to this signal"}
-                  title={copied ? "Copied" : "Copy link"}
+                  aria-label={
+                    copyFailed ? "Couldn't copy — copy the address bar" : copied ? "Link copied" : "Copy a link to this signal"
+                  }
+                  title={copyFailed ? "Couldn't copy — the address bar has the link" : copied ? "Copied" : "Copy link"}
                 >
                   {copied ? (
                     <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
@@ -808,17 +832,22 @@ export default function App() {
           phase={phase}
           globeTouched={globeTouched}
           dialTouched={dialTouched}
-          onDone={() => {
+          onDone={(learned) => {
             setGuideOn(false);
-            setDragHint(false); // the guide already taught the grab
+            if (learned) setDragHint(false); // a bowed-out guide leaves the hint
           }}
         />
       )}
 
       <footer className="foot">
-        <span>stations · radio-browser.info</span>
-        <span>earth · natural earth</span>
-        <span>arrows or drag tune the dial</span>
+        <details className="sources">
+          <summary>sources</summary>
+          <p>
+            stations · radio-browser.info · earth · natural earth · weather ·
+            open-meteo
+          </p>
+        </details>
+        <span className="foot-hint">arrows or drag tune the dial</span>
       </footer>
     </div>
   );

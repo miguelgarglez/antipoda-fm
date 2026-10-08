@@ -41,17 +41,10 @@ body {
 .top {
   display: flex;
   align-items: baseline;
-  justify-content: space-between;
+  justify-content: flex-end;
   gap: 16px;
   border-bottom: 1px solid rgba(242, 238, 227, 0.12);
   padding-bottom: 14px;
-}
-
-.wordmark {
-  font-family: var(--mono);
-  font-size: 13px;
-  letter-spacing: 0.32em;
-  color: var(--bone);
 }
 
 .top-right {
@@ -305,6 +298,12 @@ input:focus-visible,
   outline: 2px solid var(--phosphor);
   outline-offset: 3px;
   border-radius: 2px;
+}
+
+/* the ring keys keep a ring-shaped focus mark */
+.play-btn:focus-visible,
+.icon-btn:focus-visible {
+  border-radius: 50%;
 }
 
 .search {
@@ -733,6 +732,49 @@ input:focus-visible,
   color: var(--slate-2);
 }
 
+/* The name is engraved on the instrument itself, not spread across a
+   masthead — a small tag seated in the stage's upper edge. */
+.stage-tag {
+  position: absolute;
+  top: 10px;
+  left: 14px;
+  z-index: 4;
+  font-family: var(--mono);
+  font-size: 9.5px;
+  letter-spacing: 0.3em;
+  text-transform: uppercase;
+  color: rgba(242, 238, 227, 0.5);
+  pointer-events: none;
+}
+
+/* Credits fold into a disclosure — the attribution exists, but it is not
+   a second headline competing with the product. */
+.sources summary {
+  cursor: pointer;
+  list-style: none;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.sources summary::before {
+  content: "· ";
+}
+
+.sources summary::-webkit-details-marker {
+  display: none;
+}
+
+.sources[open] p {
+  margin: 6px 0 0;
+  line-height: 1.6;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .sources summary:hover {
+    color: var(--bone);
+  }
+}
+
 .visually-hidden {
   position: absolute;
   width: 1px;
@@ -782,10 +824,16 @@ input:focus-visible,
   .stage.on .globe {
     height: 210px;
   }
-  /* A two-line reservation leaves dead space under one-line names —
-     on mobile the name takes only the room it needs. */
+  /* Names still reserve two lines on mobile — a retuned long name must
+     never shove the dial upward mid-gesture under the visitor's thumb. */
   .station-name {
-    min-height: 0;
+    font-size: clamp(1.35rem, 6.4vw, 1.9rem);
+    min-height: 2.3em;
+  }
+  /* The antipode coordinate already sits in the destination caption —
+     repeating it in the card is noise on a small screen. */
+  .anti-coord {
+    display: none;
   }
   /* Captions live in the flow below the window — the destination is
      content, not chrome, and must survive the small canvas. */
@@ -1019,6 +1067,75 @@ input:focus-visible,
   border-radius: 999px;
   padding: 8px 14px;
   background: rgba(10, 11, 16, 0.8);
+}
+
+/* The breath before the lesson: one quiet word inside the stage's lower
+   edge — it reads as an annotation on the planet, not a UI element. */
+.guide-mini {
+  position: fixed;
+  transform: translateX(-50%);
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: rgba(242, 238, 227, 0.66);
+  background: rgba(10, 11, 16, 0.72);
+  border: 1px solid rgba(242, 238, 227, 0.14);
+  border-radius: 999px;
+  padding: 6px 12px;
+  pointer-events: none;
+  animation: tip-in 420ms var(--ease-out) backwards;
+}
+
+/* The dial lesson lives in the card's own flow — a slim row above the
+   tuner that never floats over the transport. */
+.dial-lesson-slot {
+  min-height: 0;
+}
+
+.dial-lesson-slot:not(:empty) {
+  margin: -2px 0 8px;
+}
+
+.guide-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border-left: 2px solid var(--signal);
+  background: rgba(17, 20, 29, 0.6);
+  padding: 7px 10px;
+  animation: tip-in 340ms var(--ease-out) backwards;
+}
+
+.guide-row p {
+  margin: 0;
+  flex: 1;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  line-height: 1.5;
+  letter-spacing: 0.03em;
+  color: rgba(242, 238, 227, 0.85);
+}
+
+.guide-row .guide-skip {
+  margin-top: 0;
+  flex: none;
+}
+
+.guide-row-dot {
+  width: 5px;
+  height: 5px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--signal);
+  animation: guide-pulse 2.6s ease-in-out infinite;
+}
+
+/* clipboard refused — the key flashes its complaint */
+.icon-btn.bad {
+  color: var(--signal);
+  border-color: rgba(255, 77, 0, 0.7);
+  animation: tip-in 200ms var(--ease-out);
 }
 
 @media (prefers-reduced-motion: reduce) {

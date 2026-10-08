@@ -1,0 +1,160 @@
+<template>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link
+    href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..900;1,9..144,300..900&family=IBM+Plex+Mono:wght@400;500&display=swap"
+    rel="stylesheet"
+  />
+  <script src="https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"></script>
+  <style>
+    /* Root styled via #root (never a class on the composition root). */
+    #root {
+      position: absolute;
+      inset: 0;
+      width: 1920px;
+      height: 1080px;
+      overflow: hidden;
+      container-type: size;
+    }
+    /* Every timed layer is a full-frame .clip box; content is positioned inside. */
+    #root .clip {
+      position: absolute;
+      inset: 0;
+    }
+    /* Full-bleed ink ground — lowest track, behind the hoisted footage. */
+    #root [id="01-hook-bg"] {
+      background: #0a0b10;
+    }
+    /* Flat legibility veil over the footage — concentrated lower-left where the
+       type sits, fading to nothing so the planet + guide arcs stay readable. */
+    #root [id="01-hook-scrim"] {
+      background:
+        linear-gradient(
+          to top,
+          rgba(10, 11, 16, 0.66) 0%,
+          rgba(10, 11, 16, 0.3) 30%,
+          rgba(10, 11, 16, 0) 55%
+        ),
+        linear-gradient(
+          to right,
+          rgba(10, 11, 16, 0.34) 0%,
+          rgba(10, 11, 16, 0) 42%
+        );
+    }
+    #root [id="01-hook-kicker-text"] {
+      position: absolute;
+      left: 106px;
+      top: 96px;
+      font-family: "IBM Plex Mono", ui-monospace, monospace;
+      font-size: 24px;
+      font-weight: 500;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: #ff4d00;
+    }
+    #root [id="01-hook-headline-inner"] {
+      position: absolute;
+      left: 106px;
+      bottom: 248px; /* bottom edge lands at y=832 — above the 896px caption keep-out */
+    }
+    #root [id="01-hook-rule"] {
+      width: 36px;
+      height: 2px;
+      background: #ff4d00;
+      margin-bottom: 26px;
+      transform-origin: left center;
+    }
+    #root [id="01-hook-headline-text"] {
+      margin: 0;
+      font-family: "Fraunces", Georgia, serif;
+      font-style: italic;
+      font-weight: 500;
+      font-size: 72px;
+      line-height: 1.14;
+      letter-spacing: -0.01em;
+      color: #f2eee3;
+    }
+  </style>
+
+  <div id="root" data-composition-id="01-hook" data-width="1920" data-height="1080">
+    <!-- full-bleed ink ground (the rendered footage itself is hoisted to the host root) -->
+    <div id="01-hook-bg" class="clip" data-start="0" data-duration="3.4" data-track-index="0"></div>
+
+    <!-- approved footage: planet drifting with guide arcs, media 0s → 3.4s, full frame cover -->
+    <video
+      id="01-hook-footage"
+      class="clip"
+      data-frame-video="approved"
+      data-frame-video-x="0"
+      data-frame-video-y="0"
+      data-frame-video-width="1920"
+      data-frame-video-height="1080"
+      data-frame-video-fit="cover"
+      src="assets/session-1080.mp4"
+      data-media-start="0"
+      data-start="0"
+      data-duration="3.4"
+      data-track-index="1"
+      muted
+      playsinline
+      preload="auto"
+    ></video>
+
+    <!-- legibility veil, fades in under the type -->
+    <div id="01-hook-scrim" class="clip" data-start="0" data-duration="3.4" data-track-index="2"></div>
+
+    <!-- mono chrome eyebrow, top-left safe zone -->
+    <div id="01-hook-kicker" class="clip" data-start="0" data-duration="3.4" data-track-index="3">
+      <span id="01-hook-kicker-text">ANTÍPODA.FM</span>
+    </div>
+
+    <!-- hook line, lower-left above the caption keep-out -->
+    <div id="01-hook-headline" class="clip" data-start="0" data-duration="3.4" data-track-index="4">
+      <div id="01-hook-headline-inner">
+        <div id="01-hook-rule"></div>
+        <p id="01-hook-headline-text">
+          somewhere on the far side of the planet,<br />a radio is playing.
+        </p>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    (function () {
+      window.__timelines = window.__timelines || {};
+      var tl = gsap.timeline({ paused: true });
+
+      var scrim = document.getElementById("01-hook-scrim");
+      var kicker = document.getElementById("01-hook-kicker-text");
+      var headline = document.getElementById("01-hook-headline-text");
+      var rule = document.getElementById("01-hook-rule");
+
+      // veil settles in first so type lands on a quieted field
+      tl.fromTo(scrim, { opacity: 0 }, { opacity: 1, duration: 0.9, ease: "power2.out" }, 0);
+
+      // kicker fades in at 0.2s — top-left safe zone
+      tl.fromTo(
+        kicker,
+        { opacity: 0, y: -8 },
+        { opacity: 1, y: 0, duration: 0.6, ease: "power2.out" },
+        0.2,
+      );
+
+      // hook line rises in 0.4s → 1.4s, ease-out, subtle
+      tl.fromTo(
+        headline,
+        { opacity: 0, y: 34 },
+        { opacity: 1, y: 0, duration: 1.0, ease: "power3.out" },
+        0.4,
+      );
+
+      // the 36×2 stub rule draws in late — the frame's only ornament
+      tl.fromTo(rule, { scaleX: 0 }, { scaleX: 1, duration: 0.5, ease: "power2.inOut" }, 1.7);
+
+      // span anchor — the frame runs the full 3.4s
+      tl.to({}, { duration: 3.4 }, 0);
+
+      window.__timelines["01-hook"] = tl;
+    })();
+  </script>
+</template>
