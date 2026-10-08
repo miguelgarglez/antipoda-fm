@@ -3,6 +3,10 @@ import { StreamMeter } from "./stream-meter";
 
 export type PlayerState = "idle" | "connecting" | "playing" | "blocked" | "error";
 
+const gvdbg =
+  typeof window !== "undefined" &&
+  new URLSearchParams(window.location.search).has("gvdbg");
+
 /**
  * Wraps a single <audio> element. Every play() gets an attempt token; only
  * the latest attempt may report state, so stale errors and late HLS imports
@@ -102,6 +106,18 @@ export class Player {
     this.wantGraph = ok;
   }
 
+  /** Meter state report: drives the UI flag and, under ?gvdbg, a test hook. */
+  private meterReport(on: boolean) {
+    this.onMeter(on);
+    if (gvdbg) {
+      (window as unknown as { __meter: { src: string; real: boolean } }).__meter =
+        {
+          src: this.meter ? "decode" : this.analyser ? "element" : "none",
+          real: on,
+        };
+    }
+  }
+
   private set(s: PlayerState) {
     if (this.stallTimer !== null) {
       window.clearTimeout(this.stallTimer);
@@ -171,7 +187,7 @@ export class Player {
         // Replays must re-report: App resets metered=false on each tune,
         // and a reused graph would otherwise silently claim unmetered.
         if (this.analyser) {
-          this.onMeter(true);
+          this.meterReport(true);
           if (!this.meter && !this.elemDead) this.armWatch();
         }
       } else {
@@ -221,7 +237,7 @@ export class Player {
             this.sourceNode.connect(this.analyser).connect(this.actx.destination);
           }
           if (this.analyser) {
-            this.onMeter(true);
+            this.meterReport(true);
             if (!this.meter && !this.elemDead) this.armWatch();
           }
         } catch {
@@ -301,7 +317,7 @@ export class Player {
   private async engageMeter() {
     const url = this.lastUrl;
     if (!this.wantGraph || !url || this.lastHls || this.meter) {
-      if (this.wantGraph && url && this.lastHls && !this.meter) this.onMeter(false);
+      if (this.wantGraph && url && this.lastHls && !this.meter) this.meterReport(false);
       return;
     }
     const att = this.attempt;
@@ -309,7 +325,7 @@ export class Player {
     meter.onDead = () => {
       if (this.meter === meter) {
         this.meter = null;
-        this.onMeter(false);
+        this.meterReport(false);
       }
     };
     const ok = await meter.start(url);
@@ -320,11 +336,11 @@ export class Player {
       return;
     }
     if (!ok) {
-      this.onMeter(false);
+      this.meterReport(false);
       return;
     }
     this.meter = meter;
-    this.onMeter(true);
+    this.meterReport(true);
   }
 
   private teardownRoute() {
@@ -345,7 +361,7 @@ export class Player {
     this.sourceNode = null;
     this.analyser = null;
     this.waveBuf = null;
-    this.onMeter(false);
+    this.meterReport(false);
   }
 
   async play(url: string, isHls: boolean): Promise<void> {

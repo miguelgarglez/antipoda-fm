@@ -219,7 +219,10 @@ export function Globe({ axis, origin, antipode, locked, boring, armed, onBoreCom
       if (s.probeT < 0 || reaim) s.probeT = 0;
       if (!reduced) {
         queueShots([
-          { at: now, dur: SHOT_MS.toOrigin, q1: qLookAt(s.axis, NORTH), z1: 1.45 },
+          // The dive stops inside the stage: R = 0.4·size·z, so z past
+          // ~1.25 shears the planet against the canvas edges. 1.2 fills
+          // 96% of the window — a push-in, not a crop.
+          { at: now, dur: SHOT_MS.toOrigin, q1: qLookAt(s.axis, NORTH), z1: 1.2 },
           {
             at: now + SHOT_MS.toOrigin + SHOT_MS.settle,
             dur: SHOT_MS.toChord,
@@ -567,6 +570,15 @@ export function Globe({ axis, origin, antipode, locked, boring, armed, onBoreCom
       const cx = w / 2;
       const cy = h / 2;
       const R = baseR * s.zoom;
+      if (gvdbg) (window as unknown as { __gz: number }).__gz = s.zoom; // test hook
+      // Captions live in the rim margin — whenever the camera pushes in
+      // (scripted shots or wheel zoom) the globe covers them, so the CSS
+      // fades them via this flag instead of overdrawing the wireframe.
+      const zoomed = s.zoom > 1.06;
+      if (zoomed !== canvas.hasAttribute("data-zoomed")) {
+        if (zoomed) canvas.setAttribute("data-zoomed", "");
+        else canvas.removeAttribute("data-zoomed");
+      }
 
       const proj = (v: Vec3): P => {
         const r = qRot(s.q, v);

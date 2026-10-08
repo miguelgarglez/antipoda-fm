@@ -110,7 +110,7 @@ body {
 
 .stage {
   position: relative;
-  width: min(56vh, 540px);
+  width: min(68vh, 640px);
   max-width: 100%;
   aspect-ratio: 1;
   margin: 0 auto;
@@ -132,6 +132,16 @@ body {
   font-size: 10px;
   letter-spacing: 0.14em;
   text-transform: uppercase;
+  transition: opacity 320ms ease;
+}
+
+/* A pushed-in camera leaves no rim margin for the readouts — they yield
+   to the planet instead of overdrawing the wireframe. Desktop only: on
+   mobile the captions flow below the canvas and never overlap it. */
+@media (min-width: 961px) {
+  .globe[data-zoomed] ~ .dial-caption {
+    opacity: 0;
+  }
 }
 
 .dial-caption .dial-you,
@@ -146,10 +156,13 @@ body {
   transition: opacity 400ms ease;
 }
 
-.dial-you {
-  /* Below the nameplate row — on small stages a centered caption reaches
-     the left edge and collides with the stage tag otherwise. */
-  top: max(46px, 9%);
+.dial-caption .dial-you {
+  /* Third line of the nameplate column — at the stage's left edge the
+     planet's rim arcs far below, so the origin stays legible at rest
+     and clears the wireframe at every camera zoom. */
+  top: max(44px, 7%);
+  left: 14px;
+  transform: none;
   color: rgba(242, 238, 227, 0.75);
 }
 
