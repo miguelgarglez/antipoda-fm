@@ -1,22 +1,22 @@
 // A GET-with-abort probe: does this stream send CORS headers? A positive
 // answer means the audio element may be routed through WebAudio for real
-// metering. Results are cached per origin — one request per stream host.
+// metering. Cached by full URL — mounts on the same host can carry
+// different CORS policies.
 
 const cache = new Map<string, Promise<boolean>>();
 
 export function probeCors(url: string): Promise<boolean> {
-  let origin: string;
   try {
-    origin = new URL(url).origin;
+    new URL(url);
   } catch {
     return Promise.resolve(false);
   }
-  const hit = cache.get(origin);
+  const hit = cache.get(url);
   if (hit) return hit;
   const p = (async () => {
     try {
       const ctrl = new AbortController();
-      const timer = setTimeout(() => ctrl.abort(), 5000);
+      const timer = setTimeout(() => ctrl.abort(), 3000);
       const res = await fetch(url, {
         signal: ctrl.signal,
         headers: { Range: "bytes=0-0" },
@@ -28,6 +28,6 @@ export function probeCors(url: string): Promise<boolean> {
       return false;
     }
   })();
-  cache.set(origin, p);
+  cache.set(url, p);
   return p;
 }

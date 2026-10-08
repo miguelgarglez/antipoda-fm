@@ -21,7 +21,10 @@ export function soundOn(): boolean {
 
 export function toggleSound(): boolean {
   enabled = !enabled;
-  if (enabled && ctx?.state === "suspended") void ctx.resume();
+  if (ctx) {
+    if (enabled) void ctx.resume();
+    else void ctx.suspend(); // a dead toggle shouldn't hold a running context
+  }
   return enabled;
 }
 

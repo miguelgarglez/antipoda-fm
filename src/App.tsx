@@ -43,6 +43,7 @@ export default function App() {
   const [armed, setArmed] = useState(false);
   const [boreDone, setBoreDone] = useState(false);
   const [there, setThere] = useState<There | null>(null);
+  const [metered, setMetered] = useState(false);
   const [snd, setSnd] = useState(false);
   const [dragHint, setDragHint] = useState(true);
 
@@ -53,6 +54,7 @@ export default function App() {
   const phaseRef = useRef<Phase>("idle");
   const runId = useRef(0);
   const searchSeq = useRef(0);
+  const selToken = useRef(0); // invalidates in-flight probe→play continuations
 
   const placeInputRef = useRef<HTMLInputElement>(null);
   const playBtnRef = useRef<HTMLButtonElement>(null);
@@ -70,14 +72,21 @@ export default function App() {
       setFailMsg("Every signal near your antipode is asleep right now.");
       return;
     }
+    const tok = ++selToken.current;
     stationIxRef.current = ix;
     setStationIx(ix);
     setLastSignalNote(false);
+    // Silence the previous signal at once — while the probe runs, the card
+    // must say CONNECTING, not keep playing the old station under the new
+    // name.
+    player.current?.stop();
+    setPlaying(false);
+    setConnecting(true);
     void (async () => {
       // Metered playback needs the stream's CORS verdict before play() wires
       // the element — a non-CORS source routed through WebAudio is muted.
       const ok = await probeCors(c.urlResolved);
-      if (stationIxRef.current !== ix) return; // superseded mid-probe
+      if (tok !== selToken.current) return; // superseded mid-probe
       player.current?.setAnalyse(ok);
       void player.current?.play(c.urlResolved, c.hls === 1);
     })();
@@ -113,6 +122,8 @@ export default function App() {
     if (s === "playing") {
       setPlaying(true);
       setConnecting(false);
+      setMetered(player.current?.analysing === true);
+      lockBlip(); // the lock lands when the signal does, not before
       setPhase("tuned");
     } else if (s === "connecting") {
       setConnecting(true);
@@ -138,7 +149,11 @@ export default function App() {
 
   useEffect(() => {
     player.current = new Player(onPlayerState);
-    return () => player.current?.stop();
+    return () => {
+      selToken.current++;
+      player.current?.dispose();
+      player.current = null;
+    };
   }, [onPlayerState]);
 
   const onBoreComplete = useCallback(() => {
@@ -151,13 +166,13 @@ export default function App() {
     }
     pushLog(`locking signal 1 of ${n}…`);
     tryStation(0);
-    lockBlip();
   }, [tryStation]);
 
   const startTune = useCallback(
     async (origin: GeoPoint) => {
       const id = ++runId.current;
       searchSeq.current++; // cancel any in-flight place search
+      selToken.current++; // cancel any in-flight probe→play
       player.current?.stop();
       candidatesRef.current = [];
       setPhase("tuning");
@@ -170,6 +185,7 @@ export default function App() {
       setArmed(false);
       setBoreDone(false);
       setThere(null);
+      setMetered(false);
       pendingOrigin.current = origin;
       const anti = antipodeOf(origin);
       pushLog("piercing the planet…");
@@ -194,6 +210,10 @@ export default function App() {
       setTune(tuned);
       candidatesRef.current = res.candidates;
       setArmed(true); // the probe may now punch through
+
+      // Warm the CORS verdict on the lead candidate while the probe is
+      // still travelling, so the first play() doesn't wait on it.
+      if (res.candidates[0]) void probeCors(res.candidates[0].urlResolved);
 
       // What it's like over there, once the signal is the story.
       const where = res.land.oceanKm !== null ? res.land.point : anti;
@@ -327,7 +347,7 @@ export default function App() {
     if (!dead) return;
     if (phase === "tuned") playBtnRef.current?.focus();
     else if (phase === "failed") failBtnRef.current?.focus();
-    else if (phase === "idle") placeInputRef.current?.focus();
+    // idle gets no autofocus — the orange action keeps first priority
   }, [phase]);
 
   const axis: Vec3 = useMemo(() => {
@@ -360,6 +380,7 @@ export default function App() {
 
   const reset = () => {
     runId.current++;
+    selToken.current++;
     player.current?.stop();
     candidatesRef.current = [];
     pendingOrigin.current = null;
@@ -372,6 +393,7 @@ export default function App() {
     setArmed(false);
     setBoreDone(false);
     setThere(null);
+    setMetered(false);
     const u = new URL(window.location.href);
     u.search = "";
     window.history.replaceState(null, "", u.toString());
@@ -415,7 +437,7 @@ export default function App() {
   const boring = phase === "tuning" && !boreDone;
 
   return (
-    <div className="shell">
+    <div className={`shell ph-${phase}`}>
       <p className="visually-hidden" aria-live="polite">
         {liveMsg}
       </p>
@@ -429,16 +451,20 @@ export default function App() {
               if (!snd) detentClick();
             }}
             aria-pressed={snd}
-            title={snd ? "Mute tuning sounds" : "Enable tuning sounds"}
+            aria-label="Interface sounds"
+            title={snd ? "Mute interface sounds" : "Enable interface sounds"}
           >
-            {snd ? "SND·ON" : "SND·OFF"}
+            {snd ? "FX·ON" : "FX·OFF"}
           </button>
           <div className="top-sub">the broadcast from underneath you</div>
         </div>
       </header>
 
       <main className="hero">
-        <section className={`stage ${boring ? "boring" : ""}`} aria-label="Earth">
+        <section
+          className={`stage${boring ? " boring" : ""}${phase === "tuned" ? " on" : ""}`}
+          aria-label="Earth"
+        >
           <Globe
             className="globe"
             axis={axisVec}
@@ -457,15 +483,20 @@ export default function App() {
               </span>
             </div>
           )}
-          {phase === "idle" && dragHint && (
-            <button
-              className="drag-hint"
-              onClick={() => setDragHint(false)}
-              aria-hidden="true"
-              tabIndex={-1}
-            >
-              drag the planet
-            </button>
+          {phase === "idle" && (
+            <div className="idle-hints">
+              <p className="earth-hint">12,742 km through the planet</p>
+              {dragHint && (
+                <button
+                  className="drag-hint"
+                  onClick={() => setDragHint(false)}
+                  aria-hidden="true"
+                  tabIndex={-1}
+                >
+                  drag the planet
+                </button>
+              )}
+            </div>
           )}
         </section>
 
@@ -476,9 +507,8 @@ export default function App() {
                 Somewhere on the far side of the planet, a radio is playing.
               </h1>
               <p className="lede">
-                Every radio app finds the station nearest you. This one points
-                straight down, through the Earth, to the station broadcasting
-                nearest your antipode, as far as live sound gets.
+                Straight down through the Earth, to the station broadcasting
+                nearest your antipode.
               </p>
               <div className="actions">
                 <button className="btn primary" onClick={locateAndTune}>
@@ -564,7 +594,9 @@ export default function App() {
                 <span className={`dot ${playing ? "on" : ""}`} />
                 {playing ? "ON AIR" : connecting ? "CONNECTING" : "PAUSED"}
               </div>
-              <h2 className="station-name">{station.name}</h2>
+              <h2 className="station-name" key={station.name}>
+                {station.name}
+              </h2>
               <p className="station-meta">
                 {[station.country, station.language]
                   .filter(Boolean)
@@ -590,6 +622,7 @@ export default function App() {
                 player={player.current}
                 active={playing}
                 connecting={connecting}
+                metered={metered}
               />
               <Dial
                 count={candidatesRef.current.length}
@@ -615,7 +648,10 @@ export default function App() {
               )}
               {there && (
                 <p className="there">
-                  {there.isDay ? "☀" : "☾"} there it's{" "}
+                  {there.isDay ? "☀" : "☾"}{" "}
+                  {tune.land.oceanKm !== null
+                    ? `${tune.land.country.name} reads `
+                    : "there it's "}
                   <b>{there.time}</b>, {there.tempC}°, {there.phrase}
                 </p>
               )}

@@ -28,6 +28,8 @@ export class Player {
   private analyser: AnalyserNode | null = null;
   private waveBuf: Float32Array<ArrayBuffer> | null = null;
   private wantGraph = false;
+  private lastUrl: string | null = null;
+  private lastHls = false;
 
   constructor(onState: (s: PlayerState) => void) {
     this.onState = onState;
@@ -44,7 +46,18 @@ export class Player {
       if (this.live) this.armStall();
     });
     a.addEventListener("error", () => {
-      if (this.live) this.set("error");
+      if (!this.live) return;
+      // A positive CORS probe can still lie (redirect chains, per-mount
+      // policy). Replay the same stream untainted once instead of
+      // burning a detent on a phantom failure.
+      if (this.sourceNode && this.lastUrl) {
+        const url = this.lastUrl;
+        const hls = this.lastHls;
+        this.wantGraph = false;
+        void this.play(url, hls);
+        return;
+      }
+      this.set("error");
     });
     a.addEventListener("ended", () => {
       if (this.live) this.set("error");
@@ -93,20 +106,32 @@ export class Player {
 
   /**
    * Route audio through an AnalyserNode, or rebuild a direct element.
-   * Runs only while halted (no live stream), so swapping the element is safe.
+   * Runs only while halted (no live stream), so swapping the element is
+   * safe. The attempt token is re-checked before mutating the element —
+   * resume() may resolve long after a newer attempt took over.
    */
-  private async setupRoute(want: boolean): Promise<void> {
+  private async setupRoute(want: boolean, token: number): Promise<void> {
     if (want && !this.sourceNode && "AudioContext" in window) {
       if (!this.actx) this.actx = new AudioContext();
       if (this.actx.state === "suspended") {
         try {
-          await this.actx.resume();
+          // Without user activation resume() can stay pending forever —
+          // bound the wait, then decide from the resulting state.
+          await Promise.race([
+            this.actx.resume(),
+            new Promise((r) => setTimeout(r, 350)),
+          ]);
         } catch {
           /* stays suspended */
         }
       }
+      if (token !== this.attempt) return;
       if (this.actx.state === "running") {
-        this.sourceNode = this.actx.createMediaElementSource(this.audio);
+        try {
+          this.sourceNode = this.actx.createMediaElementSource(this.audio);
+        } catch {
+          return; // already sourced — fall through to direct playback
+        }
         this.analyser = this.actx.createAnalyser();
         this.analyser.fftSize = 1024;
         this.analyser.smoothingTimeConstant = 0.72;
@@ -115,21 +140,35 @@ export class Player {
         this.audio.crossOrigin = "anonymous";
       }
     }
-    if (!want && this.sourceNode) {
-      // Once routed, an element can never emit CORS-tainted audio again —
-      // rebuild it so un-probed streams still play.
-      this.audio.pause();
-      this.audio = this.newAudio();
-      this.sourceNode = null;
-      this.analyser = null;
-      this.waveBuf = null;
+    if (!want && this.sourceNode) this.teardownRoute();
+  }
+
+  private teardownRoute() {
+    // Once routed, an element can never emit CORS-tainted audio again —
+    // rebuild it so un-probed streams still play.
+    this.audio.pause();
+    try {
+      this.sourceNode?.disconnect();
+    } catch {
+      /* already disconnected */
     }
+    try {
+      this.analyser?.disconnect();
+    } catch {
+      /* already disconnected */
+    }
+    this.audio = this.newAudio();
+    this.sourceNode = null;
+    this.analyser = null;
+    this.waveBuf = null;
   }
 
   async play(url: string, isHls: boolean): Promise<void> {
     const token = ++this.attempt;
     this.halt();
-    await this.setupRoute(this.wantGraph);
+    this.lastUrl = url;
+    this.lastHls = isHls;
+    await this.setupRoute(this.wantGraph, token);
     if (token !== this.attempt) return;
     if (this.sourceNode) this.audio.crossOrigin = "anonymous";
     this.live = true;
@@ -207,5 +246,24 @@ export class Player {
     this.attempt++;
     this.halt();
     this.set("idle");
+  }
+
+  /** Full teardown — the component is gone, close the context for good. */
+  dispose() {
+    this.stop();
+    try {
+      this.sourceNode?.disconnect();
+      this.analyser?.disconnect();
+    } catch {
+      /* already disconnected */
+    }
+    this.sourceNode = null;
+    this.analyser = null;
+    this.waveBuf = null;
+    this.lastUrl = null;
+    if (this.actx) {
+      void this.actx.close().catch(() => {});
+      this.actx = null;
+    }
   }
 }

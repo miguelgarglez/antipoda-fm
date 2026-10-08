@@ -78,14 +78,16 @@ body {
   padding: 4px 11px;
   cursor: pointer;
   transition:
-    color 160ms ease,
-    border-color 160ms ease,
-    transform 160ms var(--ease-out);
+    color 100ms ease,
+    border-color 100ms ease,
+    transform 80ms var(--ease-out);
 }
 
-.snd:hover {
-  color: var(--bone);
-  border-color: rgba(242, 238, 227, 0.5);
+@media (hover: hover) and (pointer: fine) {
+  .snd:hover {
+    color: var(--bone);
+    border-color: rgba(242, 238, 227, 0.5);
+  }
 }
 
 .snd:active {
@@ -159,11 +161,36 @@ body {
   opacity: 0;
 }
 
-.drag-hint {
+.idle-hints {
   position: absolute;
-  bottom: -2%;
-  left: 50%;
-  transform: translateX(-50%);
+  bottom: -4%;
+  left: 0;
+  right: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  pointer-events: none;
+}
+
+.earth-hint {
+  margin: 0;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--signal);
+  opacity: 0;
+  animation: hint-in 600ms ease-out 500ms forwards;
+}
+
+@keyframes hint-in {
+  to {
+    opacity: 0.85;
+  }
+}
+
+.drag-hint {
   font-family: var(--mono);
   font-size: 10px;
   letter-spacing: 0.18em;
@@ -173,6 +200,7 @@ body {
   border: 0;
   padding: 6px;
   cursor: pointer;
+  pointer-events: auto;
   animation: hint-breathe 3.2s ease-in-out infinite;
 }
 
@@ -223,15 +251,17 @@ body {
   cursor: pointer;
   border-radius: 2px;
   transition:
-    transform 160ms var(--ease-out),
-    background-color 160ms ease,
-    border-color 160ms ease,
-    color 160ms ease;
+    transform 80ms var(--ease-out),
+    background-color 100ms ease,
+    border-color 100ms ease,
+    color 100ms ease;
 }
 
-.btn:hover {
-  border-color: var(--bone);
-  transform: translateY(-1px);
+@media (hover: hover) and (pointer: fine) {
+  .btn:hover {
+    border-color: var(--bone);
+    transform: translateY(-1px);
+  }
 }
 
 .btn:active {
@@ -250,9 +280,11 @@ body {
   color: #14060a;
 }
 
-.btn.primary:hover {
-  background: #ff5c14;
-  border-color: #ff5c14;
+@media (hover: hover) and (pointer: fine) {
+  .btn.primary:hover {
+    background: #ff5c14;
+    border-color: #ff5c14;
+  }
 }
 
 .btn.ghost {
@@ -260,8 +292,10 @@ body {
   color: var(--slate-2);
 }
 
-.btn.ghost:hover {
-  color: var(--bone);
+@media (hover: hover) and (pointer: fine) {
+  .btn.ghost:hover {
+    color: var(--bone);
+  }
 }
 
 button:focus-visible,
@@ -332,7 +366,12 @@ input:focus-visible,
   border-radius: 2px;
 }
 
-.place-list button:hover,
+@media (hover: hover) and (pointer: fine) {
+  .place-list button:hover {
+    background: rgba(242, 238, 227, 0.08);
+  }
+}
+
 .place-list button:focus-visible {
   background: rgba(242, 238, 227, 0.08);
 }
@@ -355,14 +394,16 @@ input:focus-visible,
   padding: 6px 13px;
   cursor: pointer;
   transition:
-    color 160ms ease,
-    border-color 160ms ease,
-    transform 160ms var(--ease-out);
+    color 100ms ease,
+    border-color 100ms ease,
+    transform 80ms var(--ease-out);
 }
 
-.chip:hover {
-  color: var(--bone);
-  border-color: rgba(242, 238, 227, 0.5);
+@media (hover: hover) and (pointer: fine) {
+  .chip:hover {
+    color: var(--bone);
+    border-color: rgba(242, 238, 227, 0.5);
+  }
 }
 
 .chip:active {
@@ -419,14 +460,13 @@ input:focus-visible,
 }
 
 .card {
-  animation: card-in 420ms var(--ease-out) backwards;
+  animation: card-in 220ms var(--ease-out) backwards;
 }
 
 @keyframes card-in {
   from {
     opacity: 0;
-    transform: translateY(10px);
-    filter: blur(3px);
+    transform: translateY(6px);
   }
 }
 
@@ -465,6 +505,16 @@ input:focus-visible,
   font-style: italic;
   line-height: 1.15;
   margin: 12px 0 6px;
+  /* Two lines reserved — a retune must never move the dial or scope. */
+  min-height: 2.3em;
+  animation: name-in 120ms ease-out backwards;
+}
+
+@keyframes name-in {
+  from {
+    opacity: 0;
+    transform: translateY(3px);
+  }
 }
 
 .station-meta,
@@ -576,11 +626,30 @@ input:focus-visible,
     gap: 8px;
     align-content: start;
   }
+  /* The stage is a window onto the planet, not the hero: compact when
+     idle or tuned, roomier while the bore is the show. */
   .stage {
-    width: min(74vw, 430px);
+    width: min(74vw, 280px);
+    height: 220px;
+    aspect-ratio: auto;
+    transition:
+      height 420ms var(--ease-in-out),
+      width 420ms var(--ease-in-out);
+  }
+  .stage.boring {
+    width: min(82vw, 330px);
+    height: 268px;
+  }
+  .stage.on {
+    width: min(66vw, 230px);
+    height: 168px;
   }
   .intro h1 {
     font-size: clamp(1.6rem, 7vw, 2.1rem);
+  }
+  .lede {
+    font-size: 1rem;
+    margin-bottom: 22px;
   }
   .actions {
     flex-direction: column;
@@ -589,21 +658,43 @@ input:focus-visible,
   .search {
     max-width: none;
   }
-  /* Thumb bar: the transport stays at the bottom edge on small screens. */
+  .card {
+    padding-bottom: 78px; /* clears the floating transport */
+  }
+  /* Thumb bar: the transport is pinned to the bottom edge — one line,
+     48px touch targets, safe-area aware. */
   .controls {
-    position: sticky;
+    position: fixed;
     bottom: 0;
-    background: rgba(10, 11, 16, 0.88);
+    left: 0;
+    right: 0;
+    z-index: 30;
+    flex-wrap: nowrap;
+    gap: 8px;
+    background: linear-gradient(
+      rgba(10, 11, 16, 0) 0%,
+      rgba(10, 11, 16, 0.92) 34%
+    );
     backdrop-filter: blur(10px);
     -webkit-backdrop-filter: blur(10px);
     border-top: 1px solid rgba(242, 238, 227, 0.12);
-    padding: 12px 0;
-    margin: 20px -18px -10px;
-    padding-left: 18px;
-    padding-right: 18px;
+    padding: 14px 16px calc(12px + env(safe-area-inset-bottom));
+    margin: 0;
   }
   .controls .btn {
     flex: 1;
+    min-height: 48px;
+    padding: 12px 6px;
+    font-size: 10.5px;
+    letter-spacing: 0.09em;
+    white-space: nowrap;
+  }
+  .controls .btn.primary {
+    flex: 1.3;
+  }
+  /* The pinned transport owns the bottom edge — the credits step aside. */
+  .ph-tuned .foot {
+    display: none;
   }
 }
 
@@ -614,12 +705,15 @@ input:focus-visible,
     animation: none;
   }
   .tuning .log li,
-  .card {
+  .card,
+  .station-name,
+  .earth-hint {
     animation-duration: 1ms;
   }
   .btn,
   .chip,
-  .snd {
+  .snd,
+  .stage {
     transition: none;
   }
 }

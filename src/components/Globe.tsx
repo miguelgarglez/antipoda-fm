@@ -38,6 +38,23 @@ const CROSSINGS = [BOUNDS.mantleCore, BOUNDS.outerInner, 1 - BOUNDS.outerInner, 
   (f) => ({ frac: f, r: Math.abs(1 - 2 * f) }),
 );
 
+// The bore runs on a fixed clock, not the network's: the planet opens,
+// the probe descends on a decelerating approach, rests at the far rim
+// while the resolver answers, then the shell reseals. If the resolver is
+// fast the whole gesture lands in ~1.7s; a slow network only stretches
+// the honest hold at the exit point.
+const BORE_T = {
+  openAt: 180, // ms after boring starts — let the axis swing begin first
+  openDur: 320,
+  travelAt: 460,
+  travelDur: 920,
+  hold: 90,
+  resealDur: 240,
+};
+
+const easeInOut = (t: number) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
+const clamp01 = (t: number) => Math.min(1, Math.max(0, t));
+
 // Precomputed graticule: parallels every 30deg, meridians every 30deg.
 const GRATICULE: Vec3[][] = (() => {
   const lines: Vec3[][] = [];
@@ -81,6 +98,10 @@ export function Globe({ axis, origin, antipode, locked, boring, armed, onBoreCom
     morphT: 0,
     probeT: -1,
     boreDone: false,
+    boreStart: 0,
+    holdStart: 0,
+    resealing: false,
+    resealStart: 0,
     flashes: [] as { t: number; at: number }[],
     crossed: new Set<number>(),
     lastT: 0,
@@ -117,14 +138,25 @@ export function Globe({ axis, origin, antipode, locked, boring, armed, onBoreCom
     if (boring) {
       s.boreDone = false;
       s.crossed.clear();
+      s.resealing = false;
+      s.holdStart = 0;
+      s.boreStart = performance.now();
       if (s.probeT < 0) s.probeT = 0;
     } else {
       s.probeT = -1;
       s.flashes = [];
+      s.resealing = false;
     }
     s.dirty = true;
     s.requestDraw();
-  }, [boring, armed]);
+  }, [boring]);
+
+  // `armed` only needs to wake a sleeping (reduced-motion) loop — the bore
+  // clock must NOT restart when it lands mid-sequence.
+  useEffect(() => {
+    state.current.dirty = true;
+    state.current.requestDraw();
+  }, [armed]);
 
   useEffect(() => {
     state.current.dirty = true;
@@ -248,36 +280,55 @@ export function Globe({ axis, origin, antipode, locked, boring, armed, onBoreCom
         ctx.fill();
       }
 
-      // Bore morph: 0 = wireframe planet, 1 = opened cross-section.
-      const morphTarget = s.boring ? 1 : 0;
-      if (reduced) s.morphT = morphTarget;
-      else s.morphT += (morphTarget - s.morphT) * Math.min(1, dt * 5.2);
-      if (Math.abs(morphTarget - s.morphT) < 0.004) s.morphT = morphTarget;
-      const morph = s.morphT;
-
-      // Probe travel: decelerating crawl to a hold at 90%, punch on armed.
-      if (s.boring && s.probeT >= 0 && !s.boreDone) {
+      // Bore morph: 0 = wireframe planet, 1 = opened cross-section. The
+      // timeline is wall-clock staged; only the reseal waits on `armed`.
+      if (s.boring && !s.boreDone) {
         if (reduced) {
-          s.probeT = s.armed ? 1 : 0.9;
+          // Static opened planet until the resolver answers, then done.
+          s.morphT = s.armed ? 0 : 1;
+          s.probeT = 1;
+          if (s.armed) {
+            s.boreDone = true;
+            s.onBoreComplete?.();
+          }
         } else {
-          const target = s.armed ? 1 : 0.9;
-          const rate = s.armed ? 3.4 : 1.05;
-          s.probeT += (target - s.probeT) * Math.min(1, dt * rate);
+          const el = now - s.boreStart;
+          const open = easeInOut(clamp01((el - BORE_T.openAt) / BORE_T.openDur));
+          if (!s.resealing) {
+            s.morphT = open;
+            const pt = clamp01((el - BORE_T.travelAt) / BORE_T.travelDur);
+            s.probeT = 1 - Math.pow(1 - pt, 2.4); // decelerating approach
+            if (pt >= 1) s.probeT = 1;
+            // Rest at the far rim until the resolver answers.
+            if (pt >= 1 && s.armed) {
+              if (!s.holdStart) s.holdStart = now;
+              if (now - s.holdStart >= BORE_T.hold) {
+                s.resealing = true;
+                s.resealStart = now;
+              }
+            }
+          } else {
+            const rt = clamp01((now - s.resealStart) / BORE_T.resealDur);
+            s.morphT = 1 - easeInOut(rt);
+            if (rt >= 1) {
+              s.morphT = 0;
+              s.boreDone = true;
+              navigator.vibrate?.(12);
+              s.onBoreComplete?.();
+            }
+          }
         }
         // Boundary crossings flash their circle.
         for (const c of CROSSINGS) {
           if (s.probeT >= c.frac && !s.crossed.has(c.frac)) {
             s.crossed.add(c.frac);
-            s.flashes.push({ t: now / 1000, at: c.r });
+            s.flashes.push({ t: c.r, at: now / 1000 });
           }
         }
-        if (s.probeT >= 0.995 && s.armed) {
-          s.probeT = 1;
-          s.boreDone = true;
-          navigator.vibrate?.(12);
-          s.onBoreComplete?.();
-        }
+      } else if (!s.boring) {
+        s.morphT = reduced ? 0 : Math.max(0, s.morphT - dt * 4);
       }
+      const morph = s.morphT;
 
       // Earth disc fill.
       ctx.beginPath();
@@ -330,21 +381,38 @@ export function Globe({ axis, origin, antipode, locked, boring, armed, onBoreCom
 
       const wireA = 1 - morph;
       if (wireA > 0.02) {
-        ctx.save();
-        ctx.globalAlpha = wireA;
-        for (const ring of GRATICULE) {
-          strokeRing(ring, false, false, "rgba(242,238,227,0.045)", 0.6);
+        // While the planet opens, the shell parts along the chord first —
+        // two hemispheres slide apart, then dissolve into the section.
+        const openSplit = Math.min(1, morph / 0.3);
+        const dissolve = 1 - clamp01((morph - 0.62) / 0.33);
+        const splitPx = Math.min(openSplit, dissolve) * 16;
+        const halves: readonly (readonly [number, number, number])[] =
+          splitPx > 0.4
+            ? [[-splitPx, 0, cx + 1], [splitPx, cx - 1, w]]
+            : [[0, 0, w]];
+        for (const [dx, clipX0, clipX1] of halves) {
+          ctx.save();
+          if (dx !== 0 || halves.length > 1) {
+            ctx.beginPath();
+            ctx.rect(clipX0, 0, clipX1 - clipX0, h);
+            ctx.clip();
+            ctx.translate(dx, 0);
+          }
+          ctx.globalAlpha = Math.max(wireA, splitPx > 0.4 ? 0.3 : 0);
+          for (const ring of GRATICULE) {
+            strokeRing(ring, false, false, "rgba(242,238,227,0.045)", 0.6);
+          }
+          for (const ring of coastRings) {
+            strokeRing(ring, true, false, "rgba(90,100,120,0.14)", 0.7);
+          }
+          for (const ring of GRATICULE) {
+            strokeRing(ring, false, true, "rgba(242,238,227,0.10)", 0.7);
+          }
+          for (const ring of coastRings) {
+            strokeRing(ring, true, true, "rgba(122,139,168,0.65)", 1);
+          }
+          ctx.restore();
         }
-        for (const ring of coastRings) {
-          strokeRing(ring, true, false, "rgba(90,100,120,0.14)", 0.7);
-        }
-        for (const ring of GRATICULE) {
-          strokeRing(ring, false, true, "rgba(242,238,227,0.10)", 0.7);
-        }
-        for (const ring of coastRings) {
-          strokeRing(ring, true, true, "rgba(122,139,168,0.65)", 1);
-        }
-        ctx.restore();
       }
 
       // The opened planet.
@@ -432,9 +500,11 @@ export function Globe({ axis, origin, antipode, locked, boring, armed, onBoreCom
         }
       }
 
-      // Depth counter under the disc while boring.
+      // Depth counter under the disc while boring — depth below the
+      // nearest surface, so it falls back to 0 as the probe emerges.
       if (s.boring && s.probeT >= 0 && morph > 0.5) {
-        const depth = Math.round(s.probeT * DIAMETER_KM).toLocaleString("en-US");
+        const d = Math.min(s.probeT, 1 - s.probeT);
+        const depth = Math.round(d * DIAMETER_KM).toLocaleString("en-US");
         const parts: [string, string][] = [
           ["depth ", "rgba(152,161,184,0.9)"],
           [`${depth} km`, "rgba(124,255,178,0.95)"],

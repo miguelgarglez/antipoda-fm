@@ -37,6 +37,7 @@ export function Dial({ count, index, sweeping, onSelect, onMove, onLock, label }
     index,
     sweeping,
     speckle: [] as { x: number; y: number; a: number }[],
+    magIx: -1, // detent the needle is magnetically snapped to while dragging
   });
   st.current.count = count;
   st.current.index = index;
@@ -94,15 +95,19 @@ export function Dial({ count, index, sweeping, onSelect, onMove, onLock, label }
     // Needle physics.
     let target: number;
     if (s.sweeping && !s.dragging) {
-      // Roaming search: slow ping-pong across the band.
-      target = w / 2 + Math.sin(now / 640) * (w / 2 - PAD - 4);
+      // Roaming search: slow ping-pong across the band. Under reduced
+      // motion the needle sits mid-band and the label carries the state.
+      target = reduced ? w / 2 : w / 2 + Math.sin(now / 640) * (w / 2 - PAD - 4);
     } else if (s.dragging) {
       target = s.dragX;
     } else {
       target = detentX(s.index, w);
     }
     if (s.x === 0) s.x = target;
-    if (s.dragging || reduced || s.sweeping) {
+    if (reduced) {
+      s.v = 0;
+      s.x = target; // no travel under reduced motion — snap into place
+    } else if (s.dragging || s.sweeping) {
       s.v = 0;
       s.x += (target - s.x) * (s.sweeping ? 0.06 : 0.5);
     } else {
@@ -184,8 +189,9 @@ export function Dial({ count, index, sweeping, onSelect, onMove, onLock, label }
     ctx.textAlign = "right";
     ctx.fillText("DRAG TO TUNE", w - 2, 2);
 
-    // Keep animating while anything moves; once settled this frame is final.
-    if (!s.settled || s.dragging || s.sweeping) {
+    // Keep animating while anything moves; once settled this frame is
+    // final. Reduced motion never holds a live loop — even mid-sweep.
+    if (!reduced && (!s.settled || s.dragging || s.sweeping)) {
       s.raf = requestAnimationFrame(tickRef.current);
     } else {
       s.raf = 0;
@@ -225,14 +231,36 @@ export function Dial({ count, index, sweeping, onSelect, onMove, onLock, label }
   const onPointerMove = (e: React.PointerEvent) => {
     const s = st.current;
     if (!s.dragging) return;
-    s.dragX = posFromEvent(e);
+    let x = posFromEvent(e);
+    // Detents are magnetic: inside 4px the needle snaps, and each fresh
+    // detent gives a quiet click so the band feels segmented.
+    const near = nearestDetent(x, s.w);
+    if (Math.abs(detentX(near, s.w) - x) <= 4) {
+      x = detentX(near, s.w);
+      if (near !== s.magIx) {
+        s.magIx = near;
+        onLock?.();
+      }
+    } else {
+      s.magIx = -1;
+    }
+    s.dragX = x;
   };
   const onPointerUp = () => {
     const s = st.current;
     if (!s.dragging) return;
     s.dragging = false;
+    s.magIx = -1;
     const i = nearestDetent(s.dragX, s.w);
     if (i !== index) onSelect(i);
+    kick();
+  };
+  // A cancelled gesture restores the tuned detent instead of retuning.
+  const onPointerCancel = () => {
+    const s = st.current;
+    if (!s.dragging) return;
+    s.dragging = false;
+    s.magIx = -1;
     kick();
   };
   const onKeyDown = (e: React.KeyboardEvent) => {
@@ -270,7 +298,7 @@ export function Dial({ count, index, sweeping, onSelect, onMove, onLock, label }
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
-        onPointerCancel={onPointerUp}
+        onPointerCancel={onPointerCancel}
       />
     </div>
   );
