@@ -542,8 +542,12 @@ export default function App() {
         </section>
 
         {/* On small screens the opening lesson lives here in flow —
-            between the planet and the headline, covering neither. */}
-        <div className="guide-intro-slot" />
+            between the planet and the headline, covering neither. The
+            space is reserved while the guide owns it so the headline
+            never shifts when the row appears. */}
+        <div
+          className={`guide-intro-slot${guideOn && phase === "idle" ? " reserved" : ""}`}
+        />
 
         <section className="panel">
           {phase === "idle" && (
@@ -648,19 +652,6 @@ export default function App() {
                 <span className={`dot ${playing ? "on" : ""}`} />
                 {playing ? "ON AIR" : connecting ? "CONNECTING" : "PAUSED"}
               </div>
-              <h2 className="station-name">
-                {prevName && prevName !== station.name && (
-                  <span
-                    className="stn-old"
-                    onAnimationEnd={() => setPrevName(null)}
-                  >
-                    {prevName}
-                  </span>
-                )}
-                <span className="stn-new" key={station.name}>
-                  {station.name}
-                </span>
-              </h2>
               <p className="station-meta">
                 {[station.country, station.language]
                   .filter(Boolean)
@@ -715,6 +706,23 @@ export default function App() {
                   dialGrabX.current = null;
                 }}
               >
+                {/* The name is the tuner's identification plate — it
+                    belongs on the instrument, not the document. */}
+                <div className="dial-plate">
+                  <h2 className="station-name">
+                    {prevName && prevName !== station.name && (
+                      <span
+                        className="stn-old"
+                        onAnimationEnd={() => setPrevName(null)}
+                      >
+                        {prevName}
+                      </span>
+                    )}
+                    <span className="stn-new" key={station.name}>
+                      {station.name}
+                    </span>
+                  </h2>
+                </div>
                 <Dial
                   count={candidatesRef.current.length}
                   index={stationIx}

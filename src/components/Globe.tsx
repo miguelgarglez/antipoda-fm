@@ -334,6 +334,10 @@ export function Globe({ axis, origin, antipode, locked, boring, armed, onBoreCom
       s.shots = []; // a grab interrupts the camera
       s.shotFrom = null;
       s.wvel = [0, 0, 0];
+      // A grab during a pending re-aim cancels it — pauseT still marks the
+      // original grab instant, so the freeze continues seamlessly and the
+      // next release applies one clean shift.
+      s.reaimUntil = 0;
       // A grab freezes the bore clock too — hand and event share one
       // timeline, resumed on release by shifting boreStart forward.
       if (s.boring && !s.boreDone && !s.pauseT) s.pauseT = e.timeStamp;
@@ -786,7 +790,7 @@ export function Globe({ axis, origin, antipode, locked, boring, armed, onBoreCom
       if (morph > 0.02) {
         ctx.save();
         ctx.globalAlpha = morph;
-        const squash = 0.82 + 0.18 * easeInOut(clamp01(morph / 0.55));
+        const squash = 0.82 + 0.18 * easeInOut(clamp01((morph - 0.55) / 0.45));
         ctx.translate(0, cy);
         ctx.scale(1, squash);
         ctx.translate(0, -cy);
@@ -928,20 +932,25 @@ export function Globe({ axis, origin, antipode, locked, boring, armed, onBoreCom
           ctx.fill();
         }
         // A pulse rides the diameter on a slow cycle — this is
-        // transmission through the body, not decoration.
-        const cyc = (now / 1000) % 3.8;
-        const ph = cyc / 1.6;
+        // transmission through the body, not decoration. The very first
+        // traversal (first 3.8s of the page's life) rides bigger and
+        // brighter: the premise announced once, clearly, on entry.
+        const cyc0 = now / 1000;
+        const first = cyc0 < 3.8;
+        const cyc = cyc0 % 3.8;
+        const ph = cyc / (first ? 2.2 : 1.6);
         if (ph < 1) {
           const k = easeInOut(ph);
           const px = a0.x + (a1.x - a0.x) * k;
           const py = a0.y + (a1.y - a0.y) * k;
-          ctx.globalAlpha = Math.sin(ph * Math.PI) * 0.9;
-          const g = ctx.createRadialGradient(px, py, 0, px, py, 7);
+          const pr = first ? 11 : 7;
+          ctx.globalAlpha = Math.sin(ph * Math.PI) * (first ? 1 : 0.9);
+          const g = ctx.createRadialGradient(px, py, 0, px, py, pr);
           g.addColorStop(0, "rgba(255,240,222,0.95)");
           g.addColorStop(0.4, "rgba(255,122,40,0.8)");
           g.addColorStop(1, "rgba(255,77,0,0)");
           ctx.beginPath();
-          ctx.arc(px, py, 7, 0, Math.PI * 2);
+          ctx.arc(px, py, pr, 0, Math.PI * 2);
           ctx.fillStyle = g;
           ctx.fill();
         }
