@@ -245,10 +245,10 @@ export function Globe({ axis, origin, antipode, locked, boring, armed, onBoreCom
         const tiltAx = norm(cross(s.antipode, up));
         const aim = qRot(qAxis(tiltAx, 0.7), s.antipode); // ~40° off — the chord keeps ~64% of the visible diameter
         queueShots([
-          // A whisper of a push, not a second dive — the bore already
-          // spent the camera's budget, the arrival just lands the shot.
-          { at: now + 120, dur: 1050, q1: qLookAt(aim, up), z1: 1.08 },
-          { at: now + 120 + 1050 + 620, dur: 720, q1: qLookAt(aim, up), z1: 1 },
+          // The bore already spent the camera's budget — the arrival is a
+          // single swing at stable scale, so the destination marker and
+          // its caption land together instead of zooming a second time.
+          { at: now + 120, dur: 1050, q1: qLookAt(aim, up), z1: 1 },
         ]);
       }
     }
