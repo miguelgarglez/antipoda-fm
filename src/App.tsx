@@ -45,6 +45,7 @@ export default function App() {
   const [boreDone, setBoreDone] = useState(false);
   const [there, setThere] = useState<There | null>(null);
   const [metered, setMetered] = useState(false);
+  const [carrier, setCarrier] = useState(false); // scope draws the designed carrier
   const [prevName, setPrevName] = useState<string | null>(null); // crossfade tail
   const [snd, setSnd] = useState(false);
   const [dragHint, setDragHint] = useState(true);
@@ -470,41 +471,6 @@ export default function App() {
       <p className="visually-hidden" aria-live="polite">
         {liveMsg}
       </p>
-      <header className="topbar">
-        <span className="wordmark">
-          antípoda<i className="wordmark-dot">·</i>fm
-        </span>
-        <span className="topbar-tag">the broadcast from underneath you</span>
-        <div className="topbar-ctl">
-          <button
-            className={`snd ${snd ? "on" : ""}`}
-            onClick={() => {
-              setSnd(toggleSound());
-              if (!snd) detentClick();
-            }}
-            aria-pressed={snd}
-            aria-label="Interface sounds"
-            title={snd ? "Mute interface sounds" : "Enable interface sounds"}
-          >
-            {snd ? "fx on" : "fx off"}
-          </button>
-          <button
-            className="snd"
-            onClick={() => {
-              // A replay teaches the gestures again — the lessons it
-              // carries must see untouched controls or it skips itself.
-              setGlobeTouched(false);
-              setDialTouched(false);
-              setGuideRun((r) => r + 1);
-              setGuideOn(true);
-            }}
-            aria-label="Replay the intro"
-            title="Replay the intro"
-          >
-            guide
-          </button>
-        </div>
-      </header>
 
       <main className="hero">
         <section
@@ -562,75 +528,121 @@ export default function App() {
         />
 
         <section className="panel">
-          {phase === "idle" && (
-            <div className="intro">
-              <h1>
-                Somewhere on the far side of the planet, a radio is playing.
-              </h1>
-              <p className="lede">
-                Straight down through the Earth, to the station broadcasting
-                nearest your antipode.
-              </p>
-              <div className="actions">
-                <button className="btn primary" onClick={locateAndTune}>
-                  Tune from my location
+          {/* The receiver is the product's furniture — masthead on top in
+              every phase, standby invitation while idle. */}
+          <div className={`receiver${phase === "idle" ? " standby" : " card"}`}>
+            <div className="rx-masthead">
+              <span className="wordmark">
+                antípoda<i className="wordmark-dot">·</i>fm
+              </span>
+              <span className="mast-tag">the broadcast from underneath you</span>
+              <div className="mast-keys">
+                <button
+                  className={`snd${snd ? " on" : ""}`}
+                  onClick={() => {
+                    setSnd(toggleSound());
+                    if (!snd) detentClick();
+                  }}
+                  aria-pressed={snd}
+                  aria-label="Interface sounds"
+                  title={snd ? "Mute interface sounds" : "Enable interface sounds"}
+                >
+                  {snd ? "fx on" : "fx off"}
                 </button>
-                <div className="search">
-                  <label className="search-label" htmlFor="place">
-                    Choose your starting place
-                  </label>
-                  <input
-                    ref={placeInputRef}
-                    id="place"
-                    type="text"
-                    autoComplete="off"
-                    placeholder="Madrid, Tokyo, a peak…"
-                    value={query}
-                    onChange={(e) => setQuery(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (
-                        e.key === "Enter" &&
-                        places[0] &&
-                        placesFor.current === query.trim()
-                      )
-                        pickPlace(places[0]);
-                    }}
-                  />
-                  {places.length > 0 && (
-                    <ul className="place-list">
-                      {places.map((p, i) => (
-                        <li key={i}>
-                          <button onClick={() => pickPlace(p)}>
-                            {describePlace(p)}
-                          </button>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </div>
+                <button
+                  className="snd"
+                  onClick={() => {
+                    // A replay teaches the gestures again — the lessons it
+                    // carries must see untouched controls or it skips itself.
+                    setGlobeTouched(false);
+                    setDialTouched(false);
+                    setGuideRun((r) => r + 1);
+                    setGuideOn(true);
+                  }}
+                  aria-label="Replay the intro"
+                  title="Replay the intro"
+                >
+                  guide
+                </button>
               </div>
-              {geoDenied && (
-                <p className="note">
-                  Position unavailable. Name a place instead.
-                </p>
-              )}
-              {searchNote && <p className="note">{searchNote}</p>}
-              {searching && <p className="note dim">looking…</p>}
-              <p className="quick">
-                {QUICK_PLACES.map((q, i) => (
-                  <span key={q}>
-                    {i > 0 && <span className="quick-sep">·</span>}
-                    <button className="place-link" onClick={() => quickPlace(q)}>
-                      {q}
-                    </button>
-                  </span>
-                ))}
-              </p>
             </div>
-          )}
 
-          {phase === "tuning" && (
-            <div className="receiver tuning">
+            {phase === "idle" && (
+              <>
+                <div className="rx-plate rx-standby">
+                  <h1 className="standby-name">
+                    somewhere on the far side of the planet, a radio is
+                    playing.
+                  </h1>
+                  <p className="rx-meta">
+                    straight down through the earth — the live station nearest
+                    your antipode.
+                  </p>
+                </div>
+                <div className="rx-actions">
+                  <div className="search">
+                    <label className="search-label" htmlFor="place">
+                      choose your starting place
+                    </label>
+                    <input
+                      ref={placeInputRef}
+                      id="place"
+                      type="text"
+                      autoComplete="off"
+                      placeholder="Madrid, Tokyo, a peak…"
+                      value={query}
+                      onChange={(e) => setQuery(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (
+                          e.key === "Enter" &&
+                          places[0] &&
+                          placesFor.current === query.trim()
+                        )
+                          pickPlace(places[0]);
+                      }}
+                    />
+                    {places.length > 0 && (
+                      <ul className="place-list">
+                        {places.map((p, i) => (
+                          <li key={i}>
+                            <button onClick={() => pickPlace(p)}>
+                              {describePlace(p)}
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                  <button className="key key-go" onClick={locateAndTune}>
+                    tune from my location
+                  </button>
+                </div>
+                <div className="rx-foot">
+                  <p className="quick">
+                    try{" "}
+                    {QUICK_PLACES.map((q, i) => (
+                      <span key={q}>
+                        {i > 0 && <span className="quick-sep">·</span>}
+                        <button
+                          className="place-link"
+                          onClick={() => quickPlace(q)}
+                        >
+                          {q}
+                        </button>
+                      </span>
+                    ))}
+                  </p>
+                  {geoDenied && (
+                    <p className="note">Position unavailable. Name a place instead.</p>
+                  )}
+                  {searchNote && <p className="note">{searchNote}</p>}
+                  {searching && <p className="note dim">looking…</p>}
+                </div>
+              </>
+            )}
+
+            {phase === "tuning" && (
+              <>
               <div className="rx-head">
                 <span className="rx-lamp" aria-hidden="true" />
                 <span className="rx-state">Tuning</span>
@@ -641,7 +653,7 @@ export default function App() {
                 </span>
                 <div className="rx-keys">
                   <button className="key" onClick={reset}>
-                    step back
+                    stop
                   </button>
                 </div>
               </div>
@@ -663,21 +675,39 @@ export default function App() {
                 connecting={true}
                 metered={false}
               />
-              <Dial
-                count={candidatesRef.current.length}
-                index={stationIx}
-                sweeping={!boreDone}
-                live={false}
-                names={candidatesRef.current.map((c) => c.name)}
-                onSelect={selectSignal}
-                onMove={() => snd && staticBurst(90, 0.028)}
-                label="searching the band"
-              />
-            </div>
-          )}
+              <div className="dial-wrap">
+                <button
+                  className="dial-step"
+                  onClick={() => selectSignal(stationIx - 1)}
+                  disabled={candidatesRef.current.length < 2}
+                  aria-label="Previous signal"
+                >
+                  ‹
+                </button>
+                <Dial
+                  count={candidatesRef.current.length}
+                  index={stationIx}
+                  sweeping={!boreDone}
+                  live={false}
+                  names={candidatesRef.current.map((c) => c.name)}
+                  onSelect={selectSignal}
+                  onMove={() => snd && staticBurst(90, 0.028)}
+                  label="searching the band"
+                />
+                <button
+                  className="dial-step"
+                  onClick={() => selectSignal(stationIx + 1)}
+                  disabled={candidatesRef.current.length < 2}
+                  aria-label="Next signal"
+                >
+                  ›
+                </button>
+              </div>
+              </>
+            )}
 
-          {phase === "tuned" && station && tune && (
-            <div className="receiver card">
+            {phase === "tuned" && station && tune && (
+              <>
               <div className="rx-head">
                 <span className={`rx-lamp${playing ? " on" : ""}`} aria-hidden="true" />
                 <span className="rx-state onair">
@@ -705,7 +735,7 @@ export default function App() {
                     {playing ? "pause" : "listen"}
                   </button>
                   <button
-                    className={`key${copyFailed ? " bad" : ""}`}
+                    className={`key${copyFailed ? " bad" : copied ? " ok" : ""}`}
                     onClick={copyLink}
                     aria-label={
                       copyFailed
@@ -715,10 +745,10 @@ export default function App() {
                           : "Copy a link to this signal"
                     }
                   >
-                    {copied ? "copied" : "copy link"}
+                    {copied ? "link copied" : "copy link"}
                   </button>
                   <button className="key" onClick={reset}>
-                    elsewhere
+                    new origin
                   </button>
                 </div>
               </div>
@@ -746,6 +776,8 @@ export default function App() {
                     ? ` · ${station.codec} ${station.bitrate}k`
                     : ""}
                   {stationKm !== null && ` · ≈${formatKm(stationKm)} overland`}
+                  {offPointKm !== null &&
+                    ` · ${formatKm(offPointKm)} from the point`}
                 </p>
               </div>
 
@@ -755,10 +787,11 @@ export default function App() {
                 active={playing}
                 connecting={connecting}
                 metered={metered}
+                onCarrier={setCarrier}
               />
-              {playing && !metered && (
+              {playing && carrier && (
                 <p className="scope-note">
-                  carrier live — this stream can’t feed the meter
+                  carrier live — drawn, not measured
                 </p>
               )}
 
@@ -787,6 +820,14 @@ export default function App() {
                   dialGrabX.current = null;
                 }}
               >
+                <button
+                  className="dial-step"
+                  onClick={() => selectSignal(stationIx - 1)}
+                  disabled={stationIx <= 0}
+                  aria-label="Previous signal"
+                >
+                  ‹
+                </button>
                 <Dial
                   count={candidatesRef.current.length}
                   index={stationIx}
@@ -800,6 +841,14 @@ export default function App() {
                   }}
                   label={station.name}
                 />
+                <button
+                  className="dial-step"
+                  onClick={() => selectSignal(stationIx + 1)}
+                  disabled={stationIx >= candidatesRef.current.length - 1}
+                  aria-label="Next signal"
+                >
+                  ›
+                </button>
               </div>
               {playing && !dialTouched && !guideOn && (
                 <p className="rx-hint" role="status">
@@ -815,8 +864,13 @@ export default function App() {
                     the point
                   </p>
                 ) : (
-                  <p className="note anti-coord">
-                    antipode {formatCoord(tune.antipode)} · {tune.land.country.name}
+                  <p className="note">
+                    <b className="foot-you">you</b> ·{" "}
+                    {tune.origin.label ?? formatCoord(tune.origin)}{" "}
+                    <span className="foot-arrow" aria-hidden="true">⟶</span>
+                    <span className="visually-hidden"> to </span>
+                    antipode {formatCoord(tune.antipode)} ·{" "}
+                    {tune.land.country.name}
                   </p>
                 )}
                 {there && (
@@ -840,20 +894,21 @@ export default function App() {
                   <p className="note">last signal on the dial</p>
                 )}
               </div>
-            </div>
-          )}
+              </>
+            )}
 
-          {phase === "failed" && (
-            <div className="failed">
-              <h2>The other side is quiet.</h2>
-              <p className="lede">{failMsg}</p>
-              <div className="actions">
-                <button ref={failBtnRef} className="btn primary" onClick={reset}>
-                  Try another place
-                </button>
+            {phase === "failed" && (
+              <div className="failed">
+                <h2>The other side is quiet.</h2>
+                <p className="lede">{failMsg}</p>
+                <div className="actions">
+                  <button ref={failBtnRef} className="key key-go" onClick={reset}>
+                    try another place
+                  </button>
+                </div>
               </div>
-            </div>
-          )}
+            )}
+          </div>
         </section>
       </main>
 
@@ -878,7 +933,6 @@ export default function App() {
             open-meteo
           </p>
         </details>
-        <span className="foot-hint">arrows or drag tune the dial</span>
       </footer>
     </div>
   );

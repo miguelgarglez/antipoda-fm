@@ -5,7 +5,10 @@ const OUT = process.env.OUT_DIR ?? "raw/verify";
 const errors = [];
 
 const browser = await chromium.launch();
-const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+const ctx = await browser.newContext({
+  viewport: { width: 1440, height: 900 },
+  permissions: ["clipboard-read", "clipboard-write"],
+});
 const page = await ctx.newPage();
 page.on("console", (m) => {
   if (m.type() === "error") errors.push(`[console] ${m.text()}`);
@@ -16,9 +19,13 @@ await page.goto(URL + (URL.includes("?") ? "&" : "?") + "gvdbg", { waitUntil: "d
 await page.waitForTimeout(2400);
 await page.screenshot({ path: `${OUT}/01-idle-1440.png` });
 
-// --- guide: step 1 should ring the planet on a first visit (after the
-//     1.5s quiet beat — the mini pill bridges before the tip appears) ---
-const guideStep1 = await page.locator(".guide-step").textContent().catch(() => null);
+// --- the guide is opt-in: it starts from the "guide" deck key, never
+//     on its own ---
+const guideAuto = await page.locator(".guide").count();
+console.log("guide absent on first paint:", guideAuto === 0 ? "PASS" : "FAIL");
+await page.getByRole("button", { name: "Replay the intro" }).click();
+await page.waitForSelector(".guide", { timeout: 5000 });
+const guideStep1 = await page.locator(".guide-step, .guide-mini").first().textContent().catch(() => null);
 console.log("guide step:", guideStep1);
 
 // --- globe drag + inertia: pixels must move after release, then settle ---
@@ -78,7 +85,7 @@ await page.mouse.wheel(0, 600);
 await page.waitForTimeout(700);
 
 // --- Madrid tune: catch the bore mid-flight ---
-await page.click('button.place-link:has-text("Madrid")');
+await page.getByRole("button", { name: "Madrid", exact: true }).click();
 for (const ms of [400, 800, 1200]) {
   await page.waitForTimeout(400);
   await page.screenshot({ path: `${OUT}/03-bore-${ms}ms.png` });
@@ -107,46 +114,54 @@ const guideGone = (await page.locator(".guide").count()) === 0;
 console.log("guide dismissed after dial drag:", guideGone);
 await page.screenshot({ path: `${OUT}/05-dial-next.png` });
 
-// --- copy link ---
-await page.click('button.icon-btn').catch(() => null);
-await page.waitForTimeout(300);
+// --- copy link: real button, real outcome ---
+const copyBtn = page.getByRole("button", { name: /copy a link/i });
+await copyBtn.click();
+await page.waitForTimeout(400);
+const copiedLabel = await page.getByRole("button", { name: "Link copied" }).count();
 const clipboardOK = await page.evaluate(
   () => navigator.clipboard.readText().catch(() => "denied"),
 );
-console.log("clipboard:", clipboardOK);
+console.log("copy feedback:", copiedLabel ? "PASS" : "FAIL", "| clipboard:", clipboardOK);
 
-// --- pause / resume ---
-await page.click('button.play-btn');
-await page.waitForTimeout(400);
-const resumeVisible = await page.locator('button.play-btn[aria-label="Listen"]').count();
+// --- pause / resume: state text + button role must both flip ---
+const playBtn = page.getByRole("button", { name: "Pause the broadcast" });
+await playBtn.click();
+await page.waitForTimeout(500);
+const pausedState = await page.locator(".onair").textContent();
+const listenBtn = page.getByRole("button", { name: "Listen" });
+console.log(
+  "paused state:",
+  pausedState.includes("PAUSED") && (await listenBtn.count()) ? "PASS" : "FAIL",
+);
 await page.screenshot({ path: `${OUT}/06-paused.png` });
-console.log("resume button:", resumeVisible);
-await page.click('button.play-btn[aria-label="Listen"]').catch(() => null);
-await page.waitForTimeout(1200);
+await listenBtn.click();
+await page.waitForTimeout(1500);
+const resumed = await page.locator(".onair").textContent();
+console.log("resumed:", resumed.includes("ON AIR") ? "PASS" : "FAIL");
 
-// --- elsewhere: back to idle ---
-await page.click('button.link-btn');
-await page.waitForTimeout(800);
+// --- new origin: back to the standby receiver ---
+await page.getByRole("button", { name: /new origin/i }).click();
+await page.waitForTimeout(900);
+const standby = await page.locator(".rx-standby").count();
+console.log("back to standby:", standby ? "PASS" : "FAIL");
 await page.screenshot({ path: `${OUT}/07-back-idle.png` });
 
 // --- ocean antipode: Denver -> Indian Ocean ---
-await page.click('button.place-link:has-text("Denver")').catch(async () => {
+await page.getByRole("button", { name: "Denver", exact: true }).click().catch(async () => {
   await page.fill("#place", "Denver");
   await page.waitForSelector(".place-list li button", { timeout: 15000 });
   await page.click(".place-list li button");
 });
-await page.waitForSelector(".station-name, .dead-end, .tuning-log", { timeout: 30000 });
+await page.waitForSelector(".station-name, .failed, .rx-status", { timeout: 30000 });
 await page.waitForTimeout(3000);
 await page.screenshot({ path: `${OUT}/08-ocean.png` });
 console.log("ocean URL:", page.url());
 
-// --- mobile 375 (guide pre-seeded as seen) ---
+// --- mobile 375 ---
 const mctx = await browser.newContext({
   ...devices["iPhone 13"],
   viewport: { width: 375, height: 812 },
-});
-await mctx.addInitScript(() => {
-  try { localStorage.setItem("antipoda.guide.v2", "1"); } catch {}
 });
 const mp = await mctx.newPage();
 mp.on("pageerror", (e) => errors.push(`[mobile pageerror] ${e.message}`));
@@ -155,7 +170,7 @@ await mp.waitForTimeout(1500);
 await mp.screenshot({ path: `${OUT}/09-idle-375.png` });
 const hscroll = await mp.evaluate(() => document.documentElement.scrollWidth);
 console.log("mobile scrollWidth:", hscroll);
-await mp.click('button.place-link:has-text("Madrid")');
+await mp.getByRole("button", { name: "Madrid", exact: true }).click();
 await mp.waitForTimeout(700);
 await mp.screenshot({ path: `${OUT}/10-bore-375.png` });
 await mp.waitForSelector(".station-name", { timeout: 30000 });
@@ -173,14 +188,11 @@ const rctx = await browser.newContext({
   viewport: { width: 1440, height: 900 },
   reducedMotion: "reduce",
 });
-await rctx.addInitScript(() => {
-  try { localStorage.setItem("antipoda.guide.v2", "1"); } catch {}
-});
 const rp = await rctx.newPage();
 rp.on("pageerror", (e) => errors.push(`[rm pageerror] ${e.message}`));
 await rp.goto(URL, { waitUntil: "domcontentloaded" });
 await rp.waitForTimeout(1200);
-await rp.click('button.place-link:has-text("Madrid")');
+await rp.getByRole("button", { name: "Madrid", exact: true }).click();
 await rp.waitForTimeout(2500);
 await rp.screenshot({ path: `${OUT}/12-reduced-tuned.png` });
 await rctx.close();

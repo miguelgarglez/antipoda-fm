@@ -7,6 +7,8 @@ type Props = {
   connecting: boolean;
   /** the stream is actually routed through the analyser */
   metered?: boolean;
+  /** called when the drawn line flips between real signal and carrier */
+  onCarrier?: (carrier: boolean) => void;
   className?: string;
 };
 
@@ -16,11 +18,12 @@ type Props = {
  * can't — the usual case for plain HTTP radio mounts — it draws a flat
  * carrier and says so. An invented waveform would be a lie.
  */
-export function Scope({ player, active, connecting, metered = false, className }: Props) {
+export function Scope({ player, active, connecting, metered = false, onCarrier, className }: Props) {
   const ref = useRef<HTMLCanvasElement>(null);
   const phase = useRef(0);
   const lastWave = useRef<Float32Array | null>(null); // last real samples
   const rest = useRef(0); // paused decay: 1 live trace → 0 quiet baseline
+  const carrier = useRef<boolean | null>(null);
   const gvdbg = new URLSearchParams(window.location.search).has("gvdbg");
 
   useEffect(() => {
@@ -62,13 +65,12 @@ export function Scope({ player, active, connecting, metered = false, className }
 
       let wave = metered && running ? (player?.getWave() ?? null) : null;
       if (wave) {
-        // Exact digital silence while ON AIR is a dead analyser, not a
-        // quiet broadcast — draw the live carrier until the real signal
-        // (or the honest unmetered note) replaces it. A flat green line
-        // reads as broken.
+        // Only literal digital silence is treated as a dead analyser —
+        // the same 1e-6 bound the watchdog uses. Anything quieter but
+        // real still draws what it is: an honest, nearly flat trace.
         let silent = true;
         for (let i = 0; i < wave.length; i += 7) {
-          if (Math.abs(wave[i]) > 1e-4) {
+          if (Math.abs(wave[i]) > 1e-6) {
             silent = false;
             break;
           }
@@ -87,6 +89,13 @@ export function Scope({ player, active, connecting, metered = false, className }
           src: player?.meterKind ?? "none",
           real: wave !== null,
         };
+      }
+      // The DOM note must track what is actually drawn, not what the
+      // plumbing believes — carrier on screen means carrier disclosed.
+      const onCarrierNow = running && !wave && !ghost;
+      if (onCarrierNow !== carrier.current) {
+        carrier.current = onCarrierNow;
+        onCarrier?.(onCarrierNow);
       }
       phase.current += dt;
 
@@ -125,13 +134,18 @@ export function Scope({ player, active, connecting, metered = false, className }
         else ctx.lineTo(x, mid - v);
       }
       const on = active || connecting;
-      ctx.strokeStyle = on
-        ? wave
-          ? `rgba(124,255,178,${0.55 + Math.min(0.35, peak / (h || 1))})`
-          : "rgba(124,255,178,0.32)"
+      // Green is earned: only a real trace or a live carrier wears it.
+      // The search jitter is amber — the colour of the journey, not
+      // of a signal that has not landed yet.
+      ctx.strokeStyle = wave
+        ? `rgba(124,255,178,${0.55 + Math.min(0.35, peak / (h || 1))})`
         : ghost
           ? "rgba(124,255,178,0.28)"
-          : "rgba(152,161,184,0.25)";
+          : connecting
+            ? "rgba(255,166,84,0.4)"
+            : on
+              ? "rgba(124,255,178,0.32)"
+              : "rgba(152,161,184,0.25)";
       ctx.lineWidth = 1.2;
       ctx.stroke();
 
@@ -163,7 +177,7 @@ export function Scope({ player, active, connecting, metered = false, className }
       cancelAnimationFrame(raf);
       ro.disconnect();
     };
-  }, [player, active, connecting, metered]);
+  }, [player, active, connecting, metered, onCarrier]);
 
   return <canvas ref={ref} className={className} aria-hidden="true" />;
 }

@@ -39,20 +39,21 @@ body {
   flex-direction: column;
 }
 
-/* ---- topbar: wordmark + instrument keys in one dedicated row ---- */
+/* ---- receiver masthead: branding lives on the instrument face ---- */
 
-.topbar {
+.rx-masthead {
   display: flex;
   align-items: center;
-  gap: 16px;
-  padding: 2px 0 10px;
+  gap: 14px;
+  padding: 10px 14px;
+  border-bottom: 1px solid rgba(242, 238, 227, 0.09);
 }
 
 .wordmark {
-  font-family: var(--mono);
+  font-family: var(--disp);
   font-size: 15px;
-  font-weight: 500;
-  letter-spacing: 0.06em;
+  font-weight: 600;
+  letter-spacing: 0.02em;
   color: var(--bone);
 }
 
@@ -61,25 +62,31 @@ body {
   color: var(--signal);
 }
 
-.topbar-tag {
-  font-family: var(--mono);
-  font-size: 11.5px;
-  letter-spacing: 0.03em;
+.mast-tag {
+  font-family: var(--serif);
+  font-style: italic;
+  font-size: 12.5px;
   color: var(--slate-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
 }
 
-.topbar-ctl {
+.mast-keys {
   margin-left: auto;
   display: flex;
   gap: 8px;
+  flex: none;
 }
 
 /* Small rectangular deck keys — the receiver's own control vocabulary. */
 .snd,
 .key {
-  font-family: var(--mono);
-  font-size: 11px;
-  letter-spacing: 0.08em;
+  font-family: var(--disp);
+  font-size: 11.5px;
+  font-weight: 500;
+  letter-spacing: 0.05em;
   color: var(--slate-2);
   background: rgba(242, 238, 227, 0.03);
   border: 1px solid rgba(90, 100, 120, 0.5);
@@ -109,6 +116,28 @@ body {
 .snd.on {
   color: var(--phosphor);
   border-color: rgba(124, 255, 178, 0.5);
+}
+
+.key.ok {
+  color: var(--phosphor);
+  border-color: rgba(124, 255, 178, 0.55);
+}
+
+/* The key that starts the journey — powered ivory, warm like the probe. */
+.key-go {
+  font-size: 13px;
+  color: #181411;
+  background: var(--bone);
+  border-color: var(--bone);
+  padding: 11px 18px;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .key-go:hover {
+    color: #181411;
+    background: #fffdf4;
+    border-color: #fffdf4;
+  }
 }
 
 /* ---- hero: planet centered, receiver docked beneath ---- */
@@ -141,6 +170,7 @@ body {
    instrument now, and a tuned page still fits a 600px-tall screen. */
 .stage.on {
   width: min(30vh, 290px);
+  margin-bottom: 10px; /* the destination label clears the receiver edge */
 }
 
 @media (max-height: 700px) and (min-width: 521px) {
@@ -259,19 +289,21 @@ body {
   z-index: 2;
 }
 
-/* ---- idle ---- */
+/* ---- standby: the receiver asleep, inviting the tune ---- */
 
-.intro {
+.rx-standby {
+  padding: 22px 20px 16px;
   text-align: center;
 }
 
-.intro h1 {
+.standby-name {
   font-family: var(--disp);
-  font-size: clamp(1.85rem, 4.2vw, 2.8rem);
+  font-size: clamp(1.35rem, 3.2vw, 1.9rem);
   font-weight: 500;
-  line-height: 1.16;
-  margin: 0 0 16px;
-  letter-spacing: -0.015em;
+  line-height: 1.24;
+  margin: 0 0 10px;
+  letter-spacing: -0.01em;
+  text-wrap: balance;
 }
 
 .lede {
@@ -283,62 +315,22 @@ body {
   max-width: 52ch;
 }
 
+/* The idle control row — place input beside the powered key. */
+.rx-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px 20px;
+  align-items: end;
+  justify-content: center;
+  padding: 0 20px 6px;
+}
+
 .actions {
   display: flex;
   flex-wrap: wrap;
   gap: 18px;
-  align-items: end;
+  align-items: center;
   justify-content: center;
-}
-
-.btn {
-  font-family: var(--mono);
-  font-size: 12.5px;
-  letter-spacing: 0.05em;
-  color: var(--bone);
-  background: transparent;
-  border: 1px solid rgba(242, 238, 227, 0.28);
-  padding: 13px 20px;
-  cursor: pointer;
-  border-radius: 999px;
-  transition:
-    transform 80ms var(--ease-out),
-    background-color 100ms ease,
-    border-color 100ms ease,
-    color 100ms ease;
-}
-
-@media (hover: hover) and (pointer: fine) {
-  .btn:hover {
-    border-color: var(--bone);
-    transform: translateY(-1px);
-  }
-}
-
-.btn:active {
-  transform: scale(0.97);
-}
-
-.btn:disabled {
-  opacity: 0.45;
-  cursor: default;
-  transform: none;
-}
-
-/* The action that turns the planet is the powered one — signal green,
-   not journey orange. */
-.btn.primary {
-  background: var(--phosphor);
-  border-color: var(--phosphor);
-  color: #08130c;
-  font-weight: 500;
-}
-
-@media (hover: hover) and (pointer: fine) {
-  .btn.primary:hover {
-    background: #93ffc2;
-    border-color: #93ffc2;
-  }
 }
 
 button:focus-visible,
@@ -690,14 +682,56 @@ input:focus-visible,
   }
 }
 
-/* The dial is the receiver's bottom instrument strip. */
+/* The dial is the receiver's bottom instrument strip — the band flanked
+   by step keys so a thumb always has a real target. */
 .dial-wrap {
+  display: flex;
+  align-items: stretch;
   border-top: 1px solid rgba(242, 238, 227, 0.1);
 }
 
 .dial {
-  width: 100%;
+  flex: 1;
+  min-width: 0;
   outline-offset: 4px;
+}
+
+.dial-step {
+  flex: none;
+  width: 46px;
+  font-family: var(--disp);
+  font-size: 19px;
+  line-height: 1;
+  color: var(--slate-2);
+  background: none;
+  border: 0;
+  border-right: 1px solid rgba(242, 238, 227, 0.08);
+  cursor: pointer;
+  transition:
+    color 100ms ease,
+    background-color 100ms ease;
+}
+
+.dial-step:last-child {
+  border-right: 0;
+  border-left: 1px solid rgba(242, 238, 227, 0.08);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .dial-step:hover:not(:disabled) {
+    color: var(--bone);
+    background: rgba(242, 238, 227, 0.05);
+  }
+}
+
+.dial-step:active:not(:disabled) {
+  color: var(--phosphor);
+  background: rgba(124, 255, 178, 0.07);
+}
+
+.dial-step:disabled {
+  opacity: 0.3;
+  cursor: default;
 }
 
 .dial-canvas {
@@ -728,6 +762,16 @@ input:focus-visible,
   border-top: 1px solid rgba(242, 238, 227, 0.07);
 }
 
+/* The persistent readout: who you are and where the bore came out. */
+.foot-you {
+  color: var(--bone);
+}
+
+.foot-arrow {
+  color: var(--signal);
+  margin: 0 4px;
+}
+
 /* While the instrument owns the column, credits step aside so the
    composition never needs scroll on short desktop screens. */
 .ph-tuned .foot,
@@ -743,13 +787,14 @@ input:focus-visible,
 
 .failed {
   text-align: center;
+  padding: 18px 20px 26px;
 }
 
 .failed h2 {
   font-family: var(--disp);
   font-size: 1.8rem;
   font-weight: 500;
-  margin: 20px 0 10px;
+  margin: 10px 0 10px;
 }
 
 /* ---- footer ---- */
@@ -808,12 +853,6 @@ input:focus-visible,
 @media (max-width: 960px) {
   .shell {
     padding: 12px 16px 20px;
-  }
-  .topbar {
-    padding-bottom: 4px;
-  }
-  .topbar-tag {
-    display: none;
   }
   .snd,
   .key {
@@ -876,18 +915,27 @@ input:focus-visible,
     position: static;
     padding: 4px 0 0;
   }
-  .intro h1 {
-    font-size: clamp(1.5rem, 7vw, 1.85rem);
-    margin-bottom: 10px;
+  .mast-tag {
+    display: none; /* the instrument face stays uncluttered on a phone */
+  }
+  .standby-name {
+    font-size: clamp(1.25rem, 6vw, 1.55rem);
+  }
+  .rx-standby {
+    padding: 16px 16px 12px;
   }
   .lede {
     font-size: 12px;
     margin-bottom: 14px;
   }
+  .rx-actions,
   .actions {
     flex-direction: column;
     align-items: stretch;
-    gap: 10px;
+    gap: 12px;
+  }
+  .rx-actions .key-go {
+    padding: 13px 18px;
   }
   .search {
     max-width: none;
@@ -914,16 +962,10 @@ input:focus-visible,
   .station-name {
     font-size: clamp(1.2rem, 6vw, 1.6rem);
   }
-  /* The coordinate duplicates the destination caption visually, but the
-     caption is aria-hidden decoration — clip this one so screen readers
-     still get the coordinate. */
-  .anti-coord {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    overflow: hidden;
-    clip: rect(0 0 0 0);
-    white-space: nowrap;
+  /* Once tuned, the foot's you→antipode readout is the only place that
+     relationship survives — the globe captions step aside. */
+  .stage.on .dial-caption {
+    display: none;
   }
   /* The meter explanation must be comfortably readable on a phone. */
   .scope-note {
@@ -938,10 +980,33 @@ input:focus-visible,
   /* Once tuned, the planet shrinks to a locator — its captions' facts
      are already engraved on the receiver plate. */
   .stage.on .globe {
-    height: 156px;
+    height: 176px;
   }
-  .stage.on .dial-caption {
-    display: none;
+}
+
+/* Short phones: the whole instrument must stay inside the viewport —
+   the locator shrinks hardest, then padding tightens around it. */
+@media (max-width: 960px) and (max-height: 720px) {
+  .stage.on .globe {
+    height: 118px;
+  }
+  .rx-masthead {
+    padding: 7px 12px;
+  }
+  .rx-head {
+    padding: 8px 12px;
+  }
+  .rx-plate {
+    padding: 8px 16px 6px;
+  }
+  .scope {
+    height: 54px;
+  }
+  .rx-foot {
+    padding: 6px 16px 8px;
+  }
+  .rx-hint {
+    padding: 2px 16px 8px;
   }
 }
 
@@ -1178,9 +1243,9 @@ input:focus-visible,
   .receiver {
     animation-duration: 1ms;
   }
-  .btn,
   .snd,
   .key,
+  .dial-step,
   .place-link,
   .stage,
   .stage .globe {

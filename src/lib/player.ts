@@ -41,6 +41,7 @@ export class Player {
   // purely to feed the scope.
   private meter: StreamMeter | null = null;
   private elemDead = false;
+  private disposed = false;
   private watchTimer: number | null = null;
   private silentTicks = 0;
   private lastCT = -1;
@@ -149,6 +150,12 @@ export class Player {
         }
       }
       if (token !== this.attempt) return;
+      // Recovery failed while the element is still routed through the
+      // graph — that means silence, not metering. Rebuild direct
+      // playback first, then let the decode meter feed the scope.
+      if (this.sourceNode && this.actx?.state !== "running") {
+        this.rebuildDirect();
+      }
       void this.engageMeter();
       return;
     }
@@ -193,6 +200,10 @@ export class Player {
           if (!this.meter && !this.elemDead) this.armWatch();
         }
       } else {
+        // A suspended context with the element still routed through the
+        // graph means dead air, not just a dead meter — rebuild direct
+        // playback so the user hears the stream.
+        if (this.sourceNode) this.rebuildDirect();
         // The context needs a real user activation (the bore completes on
         // an animation frame, not a gesture). The stream was fetched with
         // CORS — it survives a late wiring — so arm a retry on the next
@@ -215,6 +226,9 @@ export class Player {
       // listener, and clearing the shared ref before removing them would
       // strand the siblings.
       this.disarmGestureWire();
+      // Pause, retune, or dispose during the resume() await must stop
+      // this continuation from resurrecting wiring and listeners.
+      const att = this.attempt;
       const actx = this.actx;
       if (actx && actx.state !== "running") {
         // Inside the activation resume() resolves — but `state` only
@@ -226,6 +240,7 @@ export class Player {
           /* stays suspended */
         }
       }
+      if (this.disposed || att !== this.attempt) return;
       if (this.wantGraph && this.actx?.state === "running") {
         try {
           if (!this.sourceNode) {
@@ -248,7 +263,12 @@ export class Player {
       }
       // Still unmetered (a non-activation event fired, or the resume
       // timed out) — re-arm and wait for the next gesture.
-      if (this.wantGraph && (!this.analyser || this.actx?.state !== "running")) {
+      if (
+        !this.disposed &&
+        att === this.attempt &&
+        this.wantGraph &&
+        (!this.analyser || this.actx?.state !== "running")
+      ) {
         this.armGestureWire();
       }
     };
@@ -354,6 +374,21 @@ export class Player {
       return;
     }
     this.onMeter(true);
+  }
+
+  /**
+   * An element routed through a suspended context produces silence.
+   * Rebuild it for direct playback and restore its source, so failed
+   * context recovery can never leave the user hearing nothing.
+   */
+  private rebuildDirect() {
+    this.teardownRoute();
+    this.audio.crossOrigin = this.wantGraph ? "anonymous" : null;
+    if (this.lastHls) {
+      this.hls?.attachMedia(this.audio);
+    } else if (this.lastUrl) {
+      this.audio.src = this.lastUrl;
+    }
   }
 
   private teardownRoute() {
@@ -490,6 +525,8 @@ export class Player {
 
   /** Full teardown — the component is gone, close the context for good. */
   dispose() {
+    this.disposed = true;
+    this.wantGraph = false; // a pending gesture retry must not re-arm
     this.stop();
     this.disarmGestureWire();
     try {

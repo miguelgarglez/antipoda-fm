@@ -47,8 +47,8 @@ const STEPS: Step[] = [
     ring: "arc",
   },
   {
-    sel: ".actions",
-    text: "Name a place, or press the orange key — the planet will open.",
+    sel: ".rx-actions",
+    text: "Name a place, or press the lit key — the planet will open.",
     timeout: 15000,
     onlyPhase: "idle",
     belowAfter: ".quick", // the place links are this step's controls — clear them

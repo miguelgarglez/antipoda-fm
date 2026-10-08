@@ -77,6 +77,7 @@ export class StreamMeter {
   private told = false;
   private lastPcm = 0; // Date.now() of the last decoded sample
   private startTimer: number | null = null;
+  private staleTimer: number | null = null;
   onDead: (() => void) | null = null;
 
   /**
@@ -141,13 +142,30 @@ export class StreamMeter {
     this.abort = ctrl;
     this.dead = false;
     this.told = false;
+    // The deadline opens before the fetch — a server that never answers
+    // headers must not hold the meter forever either.
+    this.startTimer = window.setTimeout(() => {
+      if (this.count === 0) this.fail();
+    }, 8000);
+    // And once PCM flows, a permanent stall must hand the scope back to
+    // the carrier — getWave() already goes stale; this releases the
+    // fetch/decoder and tells the player why.
+    this.staleTimer = window.setInterval(() => {
+      if (!this.dead && this.count > 0 && Date.now() - this.lastPcm > 3000) {
+        this.fail();
+      }
+    }, 1000);
     let res: Response;
     try {
       res = await fetch(url, { signal: ctrl.signal });
     } catch {
+      this.kill();
       return false;
     }
-    if (!res.ok || !res.body) return false;
+    if (!res.ok || !res.body) {
+      this.kill();
+      return false;
+    }
     const ct = (res.headers.get("content-type") || "").toLowerCase();
     const metaint = Number(res.headers.get("icy-metaint")) || 0;
     const fmt = /aac|aacp|x-hx-aac|mp4a/.test(ct)
@@ -157,18 +175,15 @@ export class StreamMeter {
         : null; // ogg/m3u8/unknown — sniff bytes in the pump
     if (fmt) {
       const ok = await this.configure(fmt, null);
-      if (ctrl.signal.aborted) return false; // stopped during configure
+      if (ctrl.signal.aborted) {
+        this.kill();
+        return false;
+      }
       if (!ok) {
-        ctrl.abort();
-        this.dead = true;
+        this.kill();
         return false;
       }
     }
-    // A server that answers but never yields decodable audio is not a
-    // meter — give startup a deadline.
-    this.startTimer = window.setTimeout(() => {
-      if (this.count === 0) this.fail();
-    }, 8000);
     void this.pump(res, metaint, fmt, ctrl);
     return true;
   }
@@ -252,6 +267,10 @@ export class StreamMeter {
     if (this.startTimer !== null) {
       clearTimeout(this.startTimer);
       this.startTimer = null;
+    }
+    if (this.staleTimer !== null) {
+      clearInterval(this.staleTimer);
+      this.staleTimer = null;
     }
     this.abort?.abort();
     this.abort = null;
@@ -338,7 +357,9 @@ export class StreamMeter {
       /* aborted or the network went away */
     } finally {
       try {
-        void reader.cancel();
+        // cancel() can reject (socket teardown) — swallow it, it is
+        // cleanup, not a failure state.
+        reader.cancel().catch(() => {});
       } catch {
         /* already closed */
       }

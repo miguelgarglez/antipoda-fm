@@ -47,6 +47,8 @@ export function Dial({ count, index, sweeping, live, names, onSelect, onMove, on
     burstT: [] as number[], // their timer ids — cleared on cancel/unmount
     lastT: 0, // frame clock for dt-normalized physics
     acc: 0, // pending seconds for the fixed-substep spring solver
+    flashIx: -1, // detent that just locked — flashes its notch
+    flashUntil: 0,
     live,
   });
   st.current.count = count;
@@ -147,6 +149,8 @@ export function Dial({ count, index, sweeping, live, names, onSelect, onMove, on
       onMove?.();
     }
     if (!wasSettled && s.settled && !s.sweeping && !s.dragging) {
+      s.flashIx = s.index;
+      s.flashUntil = now + 320;
       onLock?.();
       navigator.vibrate?.(8);
     }
@@ -175,6 +179,13 @@ export function Dial({ count, index, sweeping, live, names, onSelect, onMove, on
     for (let i = 0; i < s.count; i++) {
       const x = detentX(i, w);
       const cur = i === s.index;
+      // A detent that just locked flashes its notch — the landing is
+      // visible, not only audible.
+      if (i === s.flashIx && now < s.flashUntil) {
+        const f = (s.flashUntil - now) / 320;
+        ctx.fillStyle = `rgba(124,255,178,${0.3 * f})`;
+        ctx.fillRect(x - 4, top + 1, 8, bot - top - 2);
+      }
       ctx.strokeStyle = cur
         ? s.live
           ? "rgba(124,255,178,0.75)"
@@ -208,17 +219,24 @@ export function Dial({ count, index, sweeping, live, names, onSelect, onMove, on
         ctx.fillStyle = "rgba(124,255,178,0.25)";
         ctx.fillRect(s.x - 4, top + 1, 8, bot - top - 2);
       }
-      // The grip: a knurled tab hanging off the track's lower edge.
-      const gy = bot + 2;
-      ctx.fillStyle = s.dragging ? "rgba(242,238,227,0.22)" : "rgba(242,238,227,0.1)";
-      ctx.fillRect(s.x - 6, gy, 12, 11);
-      ctx.strokeStyle = s.dragging ? "rgba(242,238,227,0.85)" : "rgba(242,238,227,0.45)";
+      // The grip: a knurled thumb riding the track's lower edge — wide
+      // enough to read as the thing you hold, not a tick you chase.
+      const gy = bot + 1;
+      ctx.beginPath();
+      ctx.roundRect(s.x - 13, gy, 26, 13, 3);
+      ctx.fillStyle = s.dragging
+        ? "rgba(242,238,227,0.34)"
+        : "rgba(242,238,227,0.14)";
+      ctx.fill();
+      ctx.strokeStyle = s.dragging
+        ? "rgba(242,238,227,0.95)"
+        : "rgba(242,238,227,0.5)";
       ctx.lineWidth = 1;
-      ctx.strokeRect(s.x - 6.5, gy + 0.5, 13, 10);
-      for (const dx of [-3, 0, 3]) {
+      ctx.stroke();
+      for (const dx of [-6, 0, 6]) {
         ctx.beginPath();
-        ctx.moveTo(s.x + dx, gy + 2.5);
-        ctx.lineTo(s.x + dx, gy + 8.5);
+        ctx.moveTo(s.x + dx, gy + 3.5);
+        ctx.lineTo(s.x + dx, gy + 9.5);
         ctx.stroke();
       }
     }
@@ -230,29 +248,25 @@ export function Dial({ count, index, sweeping, live, names, onSelect, onMove, on
       const i = s.magIx >= 0 ? s.magIx : nearestDetent(s.dragX, w);
       const nm = names[i];
       if (nm) {
-        ctx.font = "10.5px 'IBM Plex Mono', monospace";
+        ctx.font = "12px 'IBM Plex Mono', monospace";
         ctx.textBaseline = "top";
         ctx.textAlign = "center";
         ctx.fillStyle = "rgba(242,238,227,0.9)";
-        const tx = Math.min(Math.max(s.x, 80), w - 80);
+        const tx = Math.min(Math.max(s.x, 84), w - 84);
         ctx.fillText(nm.length > 26 ? nm.slice(0, 25) + "…" : nm, tx, 1);
       }
     }
 
-    // Chrome text.
-    ctx.font = "10.5px 'IBM Plex Mono', monospace";
+    // Chrome text — the detent readout; the step keys carry the how-to.
+    ctx.font = "11px 'IBM Plex Mono', monospace";
     ctx.textBaseline = "top";
-    ctx.fillStyle = "rgba(152,161,184,0.85)";
+    ctx.fillStyle = "rgba(152,161,184,0.9)";
     ctx.textAlign = "left";
     ctx.fillText(
       s.sweeping ? "SWEEPING THE BAND…" : `STATION ${s.index + 1} OF ${s.count}`,
-      5,
+      6,
       2,
     );
-    if (!s.dragging) {
-      ctx.textAlign = "right";
-      ctx.fillText("DRAG TO TUNE", w - 5, 2);
-    }
 
     // Keep animating while anything moves; once settled this frame is
     // final. Reduced motion never holds a live loop — even mid-sweep.

@@ -124,6 +124,27 @@ export function drawSection(
   // phosphor green is reserved for actual playback lock.
   if (probe >= 0) {
     const py = cy - R + probe * 2 * R;
+    // The bore lights its host layer, not the whole plate: a glow clipped
+    // to the annulus the probe is actually inside.
+    const band: Record<string, [number, number]> = {
+      crust: [0.962, 1],
+      mantle: [0.546, 0.962],
+      "outer core": [0.192, 0.546],
+      "inner core": [0, 0.192],
+    };
+    const [rIn, rOut] = band[layerAt(probe)];
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(cx, cy, rOut * R, 0, Math.PI * 2);
+    if (rIn > 0) ctx.arc(cx, cy, rIn * R, 0, Math.PI * 2, true);
+    ctx.clip();
+    const wash = ctx.createRadialGradient(cx, py, 0, cx, py, R * 0.4);
+    wash.addColorStop(0, "rgba(255,190,120,0.42)");
+    wash.addColorStop(0.5, "rgba(255,120,40,0.16)");
+    wash.addColorStop(1, "rgba(255,120,40,0)");
+    ctx.fillStyle = wash;
+    ctx.fillRect(cx - R, cy - R, 2 * R, 2 * R);
+    ctx.restore();
     const tail = ctx.createLinearGradient(cx, py - 42, cx, py);
     tail.addColorStop(0, "rgba(255,77,0,0)");
     tail.addColorStop(1, "rgba(255,77,0,0.85)");
