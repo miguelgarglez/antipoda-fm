@@ -29,7 +29,7 @@ if (tuned) {
     await pg.waitForTimeout(3500);        // settle on new signal
   }
 }
-await pg.waitForTimeout(2500);            // hold on tuned state
+await pg.waitForTimeout(5200);            // hold on tuned state — the URL frame needs footage through 29.2s
 await ctx.close();
 await b.close();
 console.log("recorded");
