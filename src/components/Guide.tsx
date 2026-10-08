@@ -109,10 +109,18 @@ export function Guide({ phase, globeTouched, dialTouched, onDone }: Props) {
     if (done.current || fading) return;
     setFading(true);
     markGuideSeen();
-    window.setTimeout(() => {
-      done.current = true;
-      onDone(learned);
-    }, 520);
+    // Explicit dismissal answers fast; reduced-motion skips the fade
+    // entirely — the row simply disappears.
+    const reduced = window.matchMedia(
+      "(prefers-reduced-motion: reduce)",
+    ).matches;
+    window.setTimeout(
+      () => {
+        done.current = true;
+        onDone(learned);
+      },
+      reduced ? 0 : 220,
+    );
   };
   const finish = () => dismiss(true); // opted out or completed — kill the hint
   // A timeout is dismissal, not failure — the hint survives only if the

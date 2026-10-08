@@ -1224,20 +1224,27 @@ input:focus-visible,
    empty so it never becomes a stray grid cell on desktop. */
 .guide-intro-slot {
   display: none;
-  /* The row eases shut when the lesson ends — the headline glides up
-     instead of teleporting through a snap reflow. */
-  transition: min-height 300ms var(--ease-out);
 }
 .guide-intro-slot:not(:empty) {
   display: block;
   margin: 2px 0 10px;
 }
 @media (max-width: 720px) {
+  /* Height AND margins collapse together — the headline glides up
+     through the whole reclaimed space, nothing snaps. */
+  .guide-intro-slot {
+    display: block;
+    min-height: 0;
+    margin: 0;
+    transition:
+      min-height 300ms var(--ease-out),
+      margin 300ms var(--ease-out);
+  }
   /* The opening lesson owns this row from first paint — the headline
      never moves when the row arrives or leaves. */
   .guide-intro-slot.reserved {
-    display: block;
     min-height: 46px;
+    margin: 2px 0 10px;
   }
 }
 
@@ -1251,7 +1258,7 @@ input:focus-visible,
 .guide.fading,
 .guide-row.fading {
   opacity: 0;
-  transition: opacity 0.5s ease;
+  transition: opacity 0.2s ease;
 }
 
 .dial-lesson-slot:not(:empty) {
@@ -1331,7 +1338,10 @@ input:focus-visible,
     animation: none;
   }
   .guide-row,
-  .guide-mini {
+  .guide-mini,
+  .guide-tip,
+  .copy-note,
+  .icon-btn.bad {
     animation-duration: 1ms;
   }
   .tuning .log li,
@@ -1349,7 +1359,12 @@ input:focus-visible,
   .link-btn,
   .place-link,
   .stage,
-  .stage .globe {
+  .stage .globe,
+  .guide-ring,
+  .guide-tip,
+  .guide-intro-slot,
+  .guide.fading,
+  .guide-row.fading {
     transition: none;
   }
 }
