@@ -103,7 +103,8 @@ export function drawSection(
     ctx.restore();
   }
 
-  // The probe: phosphor point + comet tail.
+  // The probe: a hot point + comet tail. Warm through the journey —
+  // phosphor green is reserved for actual playback lock.
   if (probe >= 0) {
     const py = cy - R + probe * 2 * R;
     const tail = ctx.createLinearGradient(cx, py - 42, cx, py);
@@ -116,16 +117,16 @@ export function drawSection(
     ctx.lineTo(cx, py);
     ctx.stroke();
     const g = ctx.createRadialGradient(cx, py, 0, cx, py, 11);
-    g.addColorStop(0, "rgba(234,255,242,0.95)");
-    g.addColorStop(0.4, "rgba(124,255,178,0.8)");
-    g.addColorStop(1, "rgba(124,255,178,0)");
+    g.addColorStop(0, "rgba(255,240,222,0.95)");
+    g.addColorStop(0.4, "rgba(255,122,40,0.8)");
+    g.addColorStop(1, "rgba(255,77,0,0)");
     ctx.beginPath();
     ctx.arc(cx, py, 11, 0, Math.PI * 2);
     ctx.fillStyle = g;
     ctx.fill();
     ctx.beginPath();
     ctx.arc(cx, py, 2.4, 0, Math.PI * 2);
-    ctx.fillStyle = "#eafff2";
+    ctx.fillStyle = "#fff1e0";
     ctx.fill();
   }
 }

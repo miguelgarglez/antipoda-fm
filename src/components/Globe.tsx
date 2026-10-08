@@ -169,9 +169,10 @@ export function Globe({ axis, origin, antipode, locked, boring, armed, onBoreCom
     const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     let raf = 0;
     let cssSize = 0;
+    let dead = false;
 
     const requestDraw = () => {
-      if (reduced && raf === 0) raf = requestAnimationFrame(draw);
+      if (!dead && reduced && raf === 0) raf = requestAnimationFrame(draw);
     };
     state.current.requestDraw = requestDraw;
 
@@ -297,7 +298,9 @@ export function Globe({ axis, origin, antipode, locked, boring, armed, onBoreCom
           if (!s.resealing) {
             s.morphT = open;
             const pt = clamp01((el - BORE_T.travelAt) / BORE_T.travelDur);
-            s.probeT = 1 - Math.pow(1 - pt, 2.4); // decelerating approach
+            // ease-in-out: entry, core crossing, and emergence each get a
+            // beat instead of one compressed dive.
+            s.probeT = easeInOut(pt);
             if (pt >= 1) s.probeT = 1;
             // Rest at the far rim until the resolver answers.
             if (pt >= 1 && s.armed) {
@@ -380,9 +383,10 @@ export function Globe({ axis, origin, antipode, locked, boring, armed, onBoreCom
       };
 
       const wireA = 1 - morph;
-      if (wireA > 0.02) {
+      if (wireA > 0.02 || s.boring) {
         // While the planet opens, the shell parts along the chord first —
-        // two hemispheres slide apart, then dissolve into the section.
+        // two hemispheres slide apart, then settle into a ghost contour
+        // that stays legible over the exposed section until it reseals.
         const openSplit = Math.min(1, morph / 0.3);
         const dissolve = 1 - clamp01((morph - 0.62) / 0.33);
         const splitPx = Math.min(openSplit, dissolve) * 16;
@@ -398,7 +402,9 @@ export function Globe({ axis, origin, antipode, locked, boring, armed, onBoreCom
             ctx.clip();
             ctx.translate(dx, 0);
           }
-          ctx.globalAlpha = Math.max(wireA, splitPx > 0.4 ? 0.3 : 0);
+          const ghost =
+            s.boring && !s.boreDone && morph > 0.9 ? 0.12 : 0;
+          ctx.globalAlpha = Math.max(wireA, splitPx > 0.4 ? 0.3 : 0, ghost);
           for (const ring of GRATICULE) {
             strokeRing(ring, false, false, "rgba(242,238,227,0.045)", 0.6);
           }
@@ -507,7 +513,7 @@ export function Globe({ axis, origin, antipode, locked, boring, armed, onBoreCom
         const depth = Math.round(d * DIAMETER_KM).toLocaleString("en-US");
         const parts: [string, string][] = [
           ["depth ", "rgba(152,161,184,0.9)"],
-          [`${depth} km`, "rgba(124,255,178,0.95)"],
+          [`${depth} km`, "rgba(242,238,227,0.95)"],
           [` · ${layerAt(s.probeT)}`, "rgba(152,161,184,0.9)"],
         ];
         ctx.font = "11px 'IBM Plex Mono', monospace";
@@ -536,7 +542,11 @@ export function Globe({ axis, origin, antipode, locked, boring, armed, onBoreCom
     resize();
     if (raf === 0) raf = requestAnimationFrame(draw);
     return () => {
+      dead = true;
       cancelAnimationFrame(raf);
+      // Unpublish this scheduler before any replacement frame can queue
+      // onto the disposed effect.
+      state.current.requestDraw = () => {};
       ro.disconnect();
       canvas.removeEventListener("pointerdown", onDown);
       canvas.removeEventListener("pointermove", onMove);

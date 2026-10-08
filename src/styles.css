@@ -418,6 +418,16 @@ input:focus-visible,
   margin: 10px 0 0;
 }
 
+.scope-note {
+  font-family: var(--mono);
+  font-size: 9.5px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: rgba(152, 161, 184, 0.72);
+  margin: 4px 0 2px;
+  text-align: right;
+}
+
 .note.dim {
   opacity: 0.7;
 }
@@ -500,6 +510,7 @@ input:focus-visible,
 }
 
 .station-name {
+  position: relative;
   font-size: clamp(1.6rem, 3vw, 2.3rem);
   font-weight: 400;
   font-style: italic;
@@ -507,13 +518,39 @@ input:focus-visible,
   margin: 12px 0 6px;
   /* Two lines reserved — a retune must never move the dial or scope. */
   min-height: 2.3em;
-  animation: name-in 120ms ease-out backwards;
+}
+
+/* Retunes crossfade in place: the outgoing name dissolves over the
+   incoming one — no entrance travel, no layout shift. */
+.stn-new,
+.stn-old {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.stn-new {
+  animation: name-in 160ms ease-out backwards;
+}
+
+.stn-old {
+  position: absolute;
+  inset: 0 auto auto 0;
+  width: 100%;
+  pointer-events: none;
+  animation: name-out 160ms ease-in forwards;
 }
 
 @keyframes name-in {
   from {
     opacity: 0;
-    transform: translateY(3px);
+  }
+}
+
+@keyframes name-out {
+  to {
+    opacity: 0;
   }
 }
 
@@ -626,23 +663,72 @@ input:focus-visible,
     gap: 8px;
     align-content: start;
   }
-  /* The stage is a window onto the planet, not the hero: compact when
-     idle or tuned, roomier while the bore is the show. */
+  /* The stage is a column: canvas window + captions + hints in flow,
+     so the destination name can never clip or crowd the headline. */
   .stage {
     width: min(74vw, 280px);
-    height: 220px;
+    height: auto;
     aspect-ratio: auto;
-    transition:
-      height 420ms var(--ease-in-out),
-      width 420ms var(--ease-in-out);
+    display: flex;
+    flex-direction: column;
+    transition: width 320ms var(--ease-in-out);
+  }
+  .stage .globe {
+    width: 100%;
+    height: 200px;
+    flex: none;
+    transition: height 320ms var(--ease-in-out);
   }
   .stage.boring {
     width: min(82vw, 330px);
-    height: 268px;
+  }
+  .stage.boring .globe {
+    height: 252px;
   }
   .stage.on {
     width: min(66vw, 230px);
-    height: 168px;
+  }
+  .stage.on .globe {
+    height: 150px;
+  }
+  /* Captions live in the flow below the window — the destination is
+     content, not chrome, and must survive the small canvas. */
+  .dial-caption {
+    position: static;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 3px;
+    padding: 6px 0 2px;
+    text-align: center;
+  }
+  .dial-caption .dial-you,
+  .dial-caption .dial-far {
+    position: static;
+    transform: none;
+    max-width: 100%;
+    white-space: normal;
+    overflow: visible;
+    text-overflow: unset;
+  }
+  .dial-far {
+    order: -1; /* destination first — it is the point of the product */
+  }
+  .stage.boring .dial-far {
+    visibility: hidden; /* reserve the row so the stage doesn't jump */
+  }
+  .idle-hints {
+    position: static;
+    padding-bottom: 4px;
+  }
+  /* Thumb-sized targets for every mobile action, not just the transport. */
+  .chip {
+    min-height: 44px;
+    padding: 10px 16px;
+  }
+  .snd {
+    min-height: 44px;
+    padding: 10px 16px;
   }
   .intro h1 {
     font-size: clamp(1.6rem, 7vw, 2.1rem);
@@ -659,7 +745,8 @@ input:focus-visible,
     max-width: none;
   }
   .card {
-    padding-bottom: 78px; /* clears the floating transport */
+    /* clears the floating transport, including its safe-area inset */
+    padding-bottom: calc(78px + env(safe-area-inset-bottom));
   }
   /* Thumb bar: the transport is pinned to the bottom edge — one line,
      48px touch targets, safe-area aware. */

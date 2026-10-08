@@ -35,7 +35,10 @@ const dial = page.locator(".dial");
 await dial.focus();
 await page.keyboard.press("ArrowRight");
 await page.waitForTimeout(1200);
-const sigLabel = await page.locator(".dial-sig").textContent().catch(() => null);
+const sigLabel = await page
+  .locator(".dial")
+  .getAttribute("aria-valuetext")
+  .catch(() => null);
 await page.screenshot({ path: `${OUT}/04-dial-next.png` });
 console.log("dial label after ArrowRight:", sigLabel);
 

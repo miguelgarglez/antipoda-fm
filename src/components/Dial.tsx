@@ -4,6 +4,7 @@ type Props = {
   count: number; // candidates on the dial
   index: number; // currently tuned detent
   sweeping: boolean; // resolver still searching — needle roams
+  live: boolean; // station actually playing — green is earned by audio
   onSelect: (i: number) => void;
   onMove?: () => void; // called while the needle travels (static sound hook)
   onLock?: () => void; // called when the needle settles on a detent
@@ -18,7 +19,7 @@ const PAD = 14; // px inside the track
  * a damped spring — it glides, overshoots a hair, and settles like a real
  * tuner. Noise speckle density follows needle speed.
  */
-export function Dial({ count, index, sweeping, onSelect, onMove, onLock, label }: Props) {
+export function Dial({ count, index, sweeping, live, onSelect, onMove, onLock, label }: Props) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const st = useRef({
@@ -38,10 +39,14 @@ export function Dial({ count, index, sweeping, onSelect, onMove, onLock, label }
     sweeping,
     speckle: [] as { x: number; y: number; a: number }[],
     magIx: -1, // detent the needle is magnetically snapped to while dragging
+    pid: null as number | null, // the one pointer owning the drag
+    lastT: 0, // frame clock for dt-normalized physics
+    live,
   });
   st.current.count = count;
   st.current.index = index;
   st.current.sweeping = sweeping;
+  st.current.live = live;
 
   const detentX = useCallback((i: number, w: number) => {
     if (st.current.count <= 1) return w / 2;
@@ -91,6 +96,10 @@ export function Dial({ count, index, sweeping, onSelect, onMove, onLock, label }
     const h = rect.height;
     s.w = w;
     const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    // Normalize per-frame factors to elapsed time so the spring settles
+    // identically at 30/60/120Hz.
+    const dt = s.lastT ? Math.min(3, (now - s.lastT) / 16.667) : 1;
+    s.lastT = now;
 
     // Needle physics.
     let target: number;
@@ -109,12 +118,11 @@ export function Dial({ count, index, sweeping, onSelect, onMove, onLock, label }
       s.x = target; // no travel under reduced motion — snap into place
     } else if (s.dragging || s.sweeping) {
       s.v = 0;
-      s.x += (target - s.x) * (s.sweeping ? 0.06 : 0.5);
+      s.x += (target - s.x) * Math.min(1, (s.sweeping ? 0.06 : 0.5) * dt);
     } else {
-      // Damped spring — glide with a hair of overshoot.
-      const k = 0.16;
-      s.v += (target - s.x) * k;
-      s.v *= 0.78;
+      // Damped spring — glide with a hair of overshoot, time-normalized.
+      s.v += (target - s.x) * 0.16 * dt;
+      s.v *= Math.pow(0.78, dt);
       s.x += s.v;
     }
     const speed = Math.abs(target - s.x) + Math.abs(s.v);
@@ -172,9 +180,11 @@ export function Dial({ count, index, sweeping, onSelect, onMove, onLock, label }
         ctx.fillRect(Math.min(s.x + dir * trailLen, s.x), top + 1, trailLen, bot - top - 2);
       }
       const locked = s.settled && !s.sweeping;
-      ctx.fillStyle = locked ? "rgba(124,255,178,0.95)" : "#FF4D00";
+      // Green means audible signal — a settled selection that is still
+      // connecting stays orange until playback actually starts.
+      ctx.fillStyle = locked && s.live ? "rgba(124,255,178,0.95)" : "#FF4D00";
       ctx.fillRect(s.x - 1, top - 3, 2, bot - top + 6);
-      if (locked) {
+      if (locked && s.live) {
         ctx.fillStyle = "rgba(124,255,178,0.25)";
         ctx.fillRect(s.x - 4, top + 1, 8, bot - top - 2);
       }
@@ -221,35 +231,52 @@ export function Dial({ count, index, sweeping, onSelect, onMove, onLock, label }
   };
 
   const onPointerDown = (e: React.PointerEvent) => {
-    if (count < 1) return;
+    if (count < 1 || st.current.pid !== null) return; // one active pointer
     const s = st.current;
+    s.pid = e.pointerId;
     s.dragging = true;
     s.dragX = posFromEvent(e);
+    s.lastX = s.dragX;
     canvasRef.current!.setPointerCapture(e.pointerId);
     kick();
   };
   const onPointerMove = (e: React.PointerEvent) => {
     const s = st.current;
-    if (!s.dragging) return;
+    if (!s.dragging || e.pointerId !== s.pid) return;
     let x = posFromEvent(e);
-    // Detents are magnetic: inside 4px the needle snaps, and each fresh
-    // detent gives a quiet click so the band feels segmented.
-    const near = nearestDetent(x, s.w);
-    if (Math.abs(detentX(near, s.w) - x) <= 4) {
-      x = detentX(near, s.w);
-      if (near !== s.magIx) {
-        s.magIx = near;
-        onLock?.();
-      }
+    // Magnetism with hysteresis: snapped until 7px away, re-engages at 4,
+    // so hovering near a detent doesn't chatter.
+    if (s.magIx >= 0 && Math.abs(x - detentX(s.magIx, s.w)) <= 7) {
+      x = detentX(s.magIx, s.w);
     } else {
-      s.magIx = -1;
+      const near = nearestDetent(x, s.w);
+      if (Math.abs(detentX(near, s.w) - x) <= 4) {
+        x = detentX(near, s.w);
+        if (near !== s.magIx) {
+          s.magIx = near;
+          onLock?.();
+        }
+      } else {
+        s.magIx = -1;
+      }
     }
+    // Fast drags may jump over detents between events — each crossing
+    // still earns its click.
+    const lo = Math.min(s.lastX, x);
+    const hi = Math.max(s.lastX, x);
+    for (let i = 0; i < s.count; i++) {
+      const dx = detentX(i, s.w);
+      if (dx > lo && dx <= hi && i !== s.magIx) onLock?.();
+    }
+    s.lastX = x;
     s.dragX = x;
+    kick(); // reduced motion still repaints each move — no live loop
   };
-  const onPointerUp = () => {
+  const onPointerUp = (e: React.PointerEvent) => {
     const s = st.current;
-    if (!s.dragging) return;
+    if (!s.dragging || e.pointerId !== s.pid) return;
     s.dragging = false;
+    s.pid = null;
     s.magIx = -1;
     const i = nearestDetent(s.dragX, s.w);
     if (i !== index) onSelect(i);
@@ -260,22 +287,33 @@ export function Dial({ count, index, sweeping, onSelect, onMove, onLock, label }
     const s = st.current;
     if (!s.dragging) return;
     s.dragging = false;
+    s.pid = null;
     s.magIx = -1;
     kick();
   };
   const onKeyDown = (e: React.KeyboardEvent) => {
+    const s = st.current;
+    // Discrete keys move the needle at once — a keypress shouldn't trail
+    // the spring it triggered.
+    const snap = (i: number) => {
+      if (s.w > 0) {
+        s.x = detentX(i, s.w);
+        s.v = 0;
+      }
+      onSelect(i);
+    };
     if (e.key === "ArrowLeft" || e.key === "ArrowDown") {
       e.preventDefault();
-      if (index > 0) onSelect(index - 1);
+      if (index > 0) snap(index - 1);
     } else if (e.key === "ArrowRight" || e.key === "ArrowUp") {
       e.preventDefault();
-      if (index < count - 1) onSelect(index + 1);
+      if (index < count - 1) snap(index + 1);
     } else if (e.key === "Home") {
       e.preventDefault();
-      onSelect(0);
+      snap(0);
     } else if (e.key === "End") {
       e.preventDefault();
-      onSelect(count - 1);
+      snap(count - 1);
     }
   };
 

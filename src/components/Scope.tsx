@@ -77,16 +77,8 @@ export function Scope({ player, active, connecting, metered = false, className }
       ctx.lineWidth = 1.2;
       ctx.stroke();
 
-      // Honesty tag: the meter only claims to be live when it is.
-      ctx.font = "8px 'IBM Plex Mono', monospace";
-      ctx.textBaseline = "bottom";
-      ctx.textAlign = "right";
-      ctx.fillStyle = "rgba(90,100,120,0.8)";
-      ctx.fillText(
-        active ? (wave ? "METER · LIVE" : "METER N/A — CARRIER ONLY") : "",
-        w - 3,
-        h - 3,
-      );
+      // The meter state is announced in DOM text beside the scope, not as
+      // dim canvas pixels inside an aria-hidden element.
 
       if (!reduced) {
         raf = requestAnimationFrame(draw);

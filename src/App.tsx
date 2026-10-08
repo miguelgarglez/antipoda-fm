@@ -44,6 +44,7 @@ export default function App() {
   const [boreDone, setBoreDone] = useState(false);
   const [there, setThere] = useState<There | null>(null);
   const [metered, setMetered] = useState(false);
+  const [prevName, setPrevName] = useState<string | null>(null); // crossfade tail
   const [snd, setSnd] = useState(false);
   const [dragHint, setDragHint] = useState(true);
 
@@ -73,6 +74,8 @@ export default function App() {
       return;
     }
     const tok = ++selToken.current;
+    const cur = candidatesRef.current[stationIxRef.current];
+    setPrevName(cur && cur.name !== c.name ? cur.name : null);
     stationIxRef.current = ix;
     setStationIx(ix);
     setLastSignalNote(false);
@@ -578,6 +581,7 @@ export default function App() {
                 count={candidatesRef.current.length}
                 index={stationIx}
                 sweeping={!boreDone}
+                live={false}
                 onSelect={selectSignal}
                 onMove={() => snd && staticBurst(90, 0.028)}
                 label="searching the band"
@@ -594,8 +598,18 @@ export default function App() {
                 <span className={`dot ${playing ? "on" : ""}`} />
                 {playing ? "ON AIR" : connecting ? "CONNECTING" : "PAUSED"}
               </div>
-              <h2 className="station-name" key={station.name}>
-                {station.name}
+              <h2 className="station-name">
+                {prevName && prevName !== station.name && (
+                  <span
+                    className="stn-old"
+                    onAnimationEnd={() => setPrevName(null)}
+                  >
+                    {prevName}
+                  </span>
+                )}
+                <span className="stn-new" key={station.name}>
+                  {station.name}
+                </span>
               </h2>
               <p className="station-meta">
                 {[station.country, station.language]
@@ -624,10 +638,16 @@ export default function App() {
                 connecting={connecting}
                 metered={metered}
               />
+              {playing && !metered && (
+                <p className="scope-note">
+                  carrier live — this stream can’t feed the meter
+                </p>
+              )}
               <Dial
                 count={candidatesRef.current.length}
                 index={stationIx}
                 sweeping={false}
+                live={playing}
                 onSelect={selectSignal}
                 onMove={() => snd && staticBurst(90, 0.028)}
                 onLock={() => {
