@@ -19,6 +19,7 @@ export class Player {
   private audio: HTMLAudioElement;
   private hls: Hls | null = null;
   private onState: (s: PlayerState) => void;
+  private onMeter: (on: boolean) => void;
   private stallTimer: number | null = null;
   private attempt = 0;
   private live = false;
@@ -28,11 +29,13 @@ export class Player {
   private analyser: AnalyserNode | null = null;
   private waveBuf: Float32Array<ArrayBuffer> | null = null;
   private wantGraph = false;
+  private wireOnGesture: (() => void) | null = null;
   private lastUrl: string | null = null;
   private lastHls = false;
 
-  constructor(onState: (s: PlayerState) => void) {
+  constructor(onState: (s: PlayerState) => void, onMeter: (on: boolean) => void = () => {}) {
     this.onState = onState;
+    this.onMeter = onMeter;
     this.audio = this.newAudio();
   }
 
@@ -50,7 +53,7 @@ export class Player {
       // A positive CORS probe can still lie (redirect chains, per-mount
       // policy). Replay the same stream untainted once instead of
       // burning a detent on a phantom failure.
-      if (this.sourceNode && this.lastUrl) {
+      if (this.wantGraph && this.lastUrl) {
         const url = this.lastUrl;
         const hls = this.lastHls;
         this.wantGraph = false;
@@ -137,10 +140,62 @@ export class Player {
         this.analyser.smoothingTimeConstant = 0.72;
         this.waveBuf = new Float32Array(this.analyser.fftSize);
         this.sourceNode.connect(this.analyser).connect(this.actx.destination);
-        this.audio.crossOrigin = "anonymous";
+        this.onMeter(true);
+      } else {
+        // The context needs a real user activation (the bore completes on
+        // an animation frame, not a gesture). The stream was fetched with
+        // CORS — it survives a late wiring — so arm a one-shot retry on
+        // the next pointer or key press instead of staying flat forever.
+        this.armGestureWire();
       }
     }
-    if (!want && this.sourceNode) this.teardownRoute();
+    if (!want) {
+      this.disarmGestureWire();
+      if (this.sourceNode) this.teardownRoute();
+    }
+  }
+
+  private armGestureWire() {
+    if (this.wireOnGesture) return;
+    const retry = async () => {
+      this.wireOnGesture = null;
+      if (this.actx?.state === "suspended") {
+        // Inside the activation the resume() actually resolves — but
+        // `state` only flips after the promise, so await it.
+        try {
+          await this.actx.resume();
+        } catch {
+          /* stays suspended */
+        }
+      }
+      if (this.wantGraph && !this.sourceNode && this.actx?.state === "running") {
+        try {
+          this.sourceNode = this.actx.createMediaElementSource(this.audio);
+          this.analyser = this.actx.createAnalyser();
+          this.analyser.fftSize = 1024;
+          this.analyser.smoothingTimeConstant = 0.72;
+          this.waveBuf = new Float32Array(this.analyser.fftSize);
+          this.sourceNode.connect(this.analyser).connect(this.actx.destination);
+          this.onMeter(true);
+        } catch {
+          /* element already sourced elsewhere — stay direct */
+        }
+      }
+      // Still suspended (a non-activation event fired) — re-arm.
+      if (this.wantGraph && !this.sourceNode && this.actx && this.actx.state !== "running") {
+        this.armGestureWire();
+      }
+    };
+    this.wireOnGesture = retry;
+    window.addEventListener("pointerdown", retry, { once: true });
+    window.addEventListener("keydown", retry, { once: true });
+  }
+
+  private disarmGestureWire() {
+    if (!this.wireOnGesture) return;
+    window.removeEventListener("pointerdown", this.wireOnGesture);
+    window.removeEventListener("keydown", this.wireOnGesture);
+    this.wireOnGesture = null;
   }
 
   private teardownRoute() {
@@ -161,6 +216,7 @@ export class Player {
     this.sourceNode = null;
     this.analyser = null;
     this.waveBuf = null;
+    this.onMeter(false);
   }
 
   async play(url: string, isHls: boolean): Promise<void> {
@@ -170,7 +226,11 @@ export class Player {
     this.lastHls = isHls;
     await this.setupRoute(this.wantGraph, token);
     if (token !== this.attempt) return;
-    if (this.sourceNode) this.audio.crossOrigin = "anonymous";
+    // Fetch CORS-mode whenever the probe passed — even if the graph is not
+    // wired yet — so the armed gesture retry can route the element later
+    // without muting a tainted stream. An untainted replay (probe lied)
+    // must clear it again or the element keeps fetching CORS-mode.
+    this.audio.crossOrigin = this.wantGraph ? "anonymous" : null;
     this.live = true;
     this.set("connecting");
     const hlsUrl = isHls || /\.m3u8(\?|$)/i.test(url);
@@ -221,7 +281,9 @@ export class Player {
     this.live = true;
     this.set("connecting");
     this.armStall();
-    if (this.actx?.state === "suspended") void this.actx.resume();
+    // A real activation (the Listen press) — retry the graph now, since
+    // the bore-time attempt may have found the context suspended.
+    if (this.wantGraph && !this.sourceNode) void this.setupRoute(true, token);
     this.audio.play().catch((e) => {
       if (token === this.attempt && this.live) this.set(this.fail(e));
     });
@@ -251,6 +313,7 @@ export class Player {
   /** Full teardown — the component is gone, close the context for good. */
   dispose() {
     this.stop();
+    this.disarmGestureWire();
     try {
       this.sourceNode?.disconnect();
       this.analyser?.disconnect();

@@ -125,7 +125,6 @@ export default function App() {
     if (s === "playing") {
       setPlaying(true);
       setConnecting(false);
-      setMetered(player.current?.analysing === true);
       lockBlip(); // the lock lands when the signal does, not before
       setPhase("tuned");
     } else if (s === "connecting") {
@@ -151,7 +150,7 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    player.current = new Player(onPlayerState);
+    player.current = new Player(onPlayerState, setMetered);
     return () => {
       selToken.current++;
       player.current?.dispose();

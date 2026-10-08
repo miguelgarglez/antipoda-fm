@@ -55,6 +55,10 @@ export function Scope({ player, active, connecting, metered = false, className }
       const n = Math.max(2, Math.floor(w / 2));
       const t = phase.current;
       let peak = 0;
+      // A live-but-unmetered stream draws a designed carrier: a breathing
+      // trace plus a slow pulse sweeping the band. Alive enough to read as
+      // signal, honest enough that it never pretends to be the audio.
+      const pulseX = ((t * 0.11) % 1) * w;
       for (let i = 0; i <= n; i++) {
         const x = (i / n) * w;
         let v = 0;
@@ -64,15 +68,26 @@ export function Scope({ player, active, connecting, metered = false, className }
         } else if (connecting) {
           // Searching: restless jitter.
           v = Math.sin(i * 43.7 + t * 60) * Math.sin(i * 7.3) * h * 0.1;
+        } else if (active) {
+          const breathe = 0.7 + 0.3 * Math.sin(t * 0.83);
+          v =
+            Math.sin(i * 0.05 + t * 1.7) *
+            Math.sin(i * 0.019 - t * 0.61) *
+            h *
+            0.075 *
+            breathe;
+          const d = x - pulseX;
+          v += Math.exp(-(d * d) / 800) * Math.sin(t * 7) * h * 0.09;
         }
-        // An unmetered carrier draws flat — a live signal we can't see.
         peak = Math.max(peak, Math.abs(v));
         if (i === 0) ctx.moveTo(x, mid - v);
         else ctx.lineTo(x, mid - v);
       }
       const on = active || connecting;
       ctx.strokeStyle = on
-        ? `rgba(124,255,178,${wave ? 0.55 + Math.min(0.35, peak / (h || 1)) : 0.45})`
+        ? wave
+          ? `rgba(124,255,178,${0.55 + Math.min(0.35, peak / (h || 1))})`
+          : "rgba(124,255,178,0.32)"
         : "rgba(255,77,0,0.35)";
       ctx.lineWidth = 1.2;
       ctx.stroke();

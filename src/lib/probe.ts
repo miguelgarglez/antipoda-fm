@@ -6,6 +6,9 @@
 const cache = new Map<string, Promise<boolean>>();
 
 export function probeCors(url: string): Promise<boolean> {
+  if (new URLSearchParams(window.location.search).has("nocors")) {
+    return Promise.resolve(false); // preview hook for the unmetered carrier
+  }
   try {
     new URL(url);
   } catch {
