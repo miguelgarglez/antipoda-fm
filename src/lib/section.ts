@@ -86,6 +86,19 @@ export function drawSection(
     ctx.stroke();
   }
 
+  // The shell itself: a solid crust band around the molten interior —
+  // the plate reads as a sliced body with thickness, not a diagram.
+  ctx.beginPath();
+  ctx.arc(cx, cy, R, 0, Math.PI * 2);
+  ctx.arc(cx, cy, R * 0.962, 0, Math.PI * 2, true);
+  ctx.fillStyle = "rgba(46,30,22,0.92)";
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(cx, cy, R * 0.962, 0, Math.PI * 2);
+  ctx.strokeStyle = "rgba(255,120,50,0.30)";
+  ctx.lineWidth = 1;
+  ctx.stroke();
+
   // Crust rim.
   ctx.beginPath();
   ctx.arc(cx, cy, R, 0, Math.PI * 2);

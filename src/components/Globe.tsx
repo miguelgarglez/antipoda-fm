@@ -23,6 +23,10 @@ import {
 import { coastRings } from "../lib/earth";
 import { drawSection, layerAt, DIAMETER_KM, BOUNDS } from "../lib/section";
 
+/** Idle premise line — a fixed world diameter, tilted so it reads as a
+    signal passing through the body, not a screen-space decoration. */
+const IDLE_AXIS: Vec3 = norm([0.62, 0.42, 0.66]);
+
 type Props = {
   axis: Vec3;
   origin: Vec3 | null;
@@ -376,19 +380,24 @@ export function Globe({ axis, origin, antipode, locked, boring, armed, onBoreCom
       if (!s.pauseT) return;
       const held = at - s.pauseT;
       s.pauseT = 0;
-      s.boreStart += held;
-      if (s.resealStart) s.resealStart += held;
-      if (s.holdStart) s.holdStart += held;
-      for (const f of s.flashes) f.at += held / 1000;
-      // A real drag during the prelude knocked the camera off its aim —
-      // re-orient to the chord view over a short beat before the clock
-      // resumes, so the bore still opens on the intended axis.
-      if (s.dragAcc > 8 && s.boring && !s.boreDone && s.boreAxis) {
+      // A real drag knocked the camera off its aim — re-orient to the
+      // chord view first; the bore clock waits out the 220ms re-aim too,
+      // so the probe never resumes into a misaligned cutaway.
+      const REAIM = 220;
+      const reaimAxis =
+        s.dragAcc > 8 && s.boring && !s.boreDone ? s.boreAxis : null;
+      const shift = held + (reaimAxis ? REAIM : 0);
+      s.boreStart += shift;
+      if (s.resealStart) s.resealStart += shift;
+      if (s.holdStart) s.holdStart += shift;
+      if (s.exitAt) s.exitAt += shift;
+      for (const f of s.flashes) f.at += shift / 1000;
+      if (reaimAxis) {
         s.shots = [
           {
             at: performance.now(),
-            dur: 220,
-            q1: qAxisUp(s.boreAxis, qForward(s.q)),
+            dur: REAIM,
+            q1: qAxisUp(reaimAxis, qForward(s.q)),
             z1: s.zoomT,
           },
         ];
@@ -714,6 +723,38 @@ export function Globe({ axis, origin, antipode, locked, boring, armed, onBoreCom
           for (const ring of coastRings) {
             strokeRing(ring, true, true, "rgba(122,139,168,0.78)", 1);
           }
+          if (dx !== 0) {
+            // The fresh cut face: where this half was severed the flat
+            // edge catches a warm seam of light, and a soft glow bleeds
+            // a few px into the shell — the body was opened, not faded.
+            const faceX = (dx < 0 ? clipX1 - 1 : clipX0 + 1) - dx;
+            const faceH = Math.sqrt(
+              Math.max(0, R * R - (Math.abs(dx) + 1) ** 2),
+            );
+            const seamA = Math.min(1, splitPx / (R * 0.03)) * 0.6;
+            ctx.strokeStyle = `rgba(255,170,105,${seamA})`;
+            ctx.lineWidth = 1.5;
+            ctx.beginPath();
+            ctx.moveTo(faceX, cy - faceH);
+            ctx.lineTo(faceX, cy + faceH);
+            ctx.stroke();
+            const inward = dx < 0 ? -1 : 1;
+            const fg = ctx.createLinearGradient(
+              faceX + inward * 9,
+              0,
+              faceX,
+              0,
+            );
+            fg.addColorStop(0, "rgba(255,110,40,0)");
+            fg.addColorStop(1, `rgba(255,110,40,${seamA * 0.35})`);
+            ctx.fillStyle = fg;
+            ctx.fillRect(
+              dx < 0 ? faceX - 9 : faceX,
+              cy - faceH,
+              9,
+              faceH * 2,
+            );
+          }
           ctx.restore();
         }
       }
@@ -836,7 +877,33 @@ export function Globe({ axis, origin, antipode, locked, boring, armed, onBoreCom
           }
           drawMarker(s.origin, "origin");
           drawMarker(s.antipode, "anti");
-        } else {
+        }
+      } else if (morph < 0.02) {
+        // No tune yet: the premise drawn on the object itself — a faint
+        // signal diameter fixed to the planet, so dragging turns the
+        // line with the body it passes through.
+        const a0 = proj(IDLE_AXIS);
+        const a1 = proj(scale(IDLE_AXIS, -1));
+        ctx.save();
+        ctx.setLineDash([1.5, 5]);
+        ctx.strokeStyle = ORANGE;
+        ctx.lineWidth = 1.3;
+        ctx.globalAlpha = 0.34;
+        ctx.beginPath();
+        ctx.moveTo(a0.x, a0.y);
+        ctx.lineTo(a1.x, a1.y);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        for (const p of [a0, a1]) {
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, 2.2, 0, Math.PI * 2);
+          ctx.fillStyle = "rgba(255,77,0,0.55)";
+          ctx.fill();
+        }
+        ctx.restore();
+      }
+
+      if (s.origin && s.antipode && morph >= 0.02) {
           // Section diagram: fixed endpoints at the cut.
           const top = { x: cx, y: cy - R };
           const bot = { x: cx, y: cy + R };
@@ -862,7 +929,6 @@ export function Globe({ axis, origin, antipode, locked, boring, armed, onBoreCom
           ctx.fillStyle = ORANGE;
           ctx.fill();
           ctx.restore();
-        }
       }
 
       // Progress counter under the disc while boring — distance crossed

@@ -51,6 +51,10 @@ export default function App() {
   const [dragHint, setDragHint] = useState(true);
   const [guideOn, setGuideOn] = useState(() => !guideSeen());
   const [guideRun, setGuideRun] = useState(0);
+  // Once the dial lesson has been shown this session its slot keeps the
+  // height — the tuner must never move under a resting thumb.
+  const guideWasOnRef = useRef(guideOn);
+  if (guideOn) guideWasOnRef.current = true;
   const [globeTouched, setGlobeTouched] = useState(false);
   const [dialTouched, setDialTouched] = useState(false);
 
@@ -459,39 +463,6 @@ export default function App() {
       <p className="visually-hidden" aria-live="polite">
         {liveMsg}
       </p>
-      <header className="top">
-        <div className="top-right">
-          <button
-            className={`snd ${snd ? "on" : ""}`}
-            onClick={() => {
-              setSnd(toggleSound());
-              if (!snd) detentClick();
-            }}
-            aria-pressed={snd}
-            aria-label="Interface sounds"
-            title={snd ? "Mute interface sounds" : "Enable interface sounds"}
-          >
-            {snd ? "FX·ON" : "FX·OFF"}
-          </button>
-          <button
-            className="snd"
-            onClick={() => {
-              // A replay teaches the gestures again — the lessons it
-              // carries must see untouched controls or it skips itself.
-              setGlobeTouched(false);
-              setDialTouched(false);
-              setGuideRun((r) => r + 1);
-              setGuideOn(true);
-            }}
-            aria-label="Replay the intro"
-            title="Replay the intro"
-          >
-            ?
-          </button>
-          <div className="top-sub">the broadcast from underneath you</div>
-        </div>
-      </header>
-
       <main className="hero">
         <section
           className={`stage${boring ? " boring" : ""}${phase === "tuned" ? " on" : ""}`}
@@ -509,6 +480,36 @@ export default function App() {
             onInteract={() => setGlobeTouched(true)}
           />
           <span className="stage-tag">antípoda.fm</span>
+          <span className="stage-sub">the broadcast from underneath you</span>
+          <div className="stage-ctl">
+            <button
+              className={`snd ${snd ? "on" : ""}`}
+              onClick={() => {
+                setSnd(toggleSound());
+                if (!snd) detentClick();
+              }}
+              aria-pressed={snd}
+              aria-label="Interface sounds"
+              title={snd ? "Mute interface sounds" : "Enable interface sounds"}
+            >
+              {snd ? "FX·ON" : "FX·OFF"}
+            </button>
+            <button
+              className="snd"
+              onClick={() => {
+                // A replay teaches the gestures again — the lessons it
+                // carries must see untouched controls or it skips itself.
+                setGlobeTouched(false);
+                setDialTouched(false);
+                setGuideRun((r) => r + 1);
+                setGuideOn(true);
+              }}
+              aria-label="Replay the intro"
+              title="Replay the intro"
+            >
+              ?
+            </button>
+          </div>
           {phase !== "idle" && (
             <div className="dial-caption" aria-hidden="true">
               {/* Mount from the start of tuning — the rows exist before
@@ -688,8 +689,11 @@ export default function App() {
                   carrier live — this stream can’t feed the meter
                 </p>
               )}
-              <div className="dial-lesson-slot" />
               <div
+                className={`dial-lesson-slot${guideWasOnRef.current ? " held" : ""}`}
+              />
+              <div
+                className="dial-wrap"
                 onPointerDownCapture={(e) => {
                   dialGrabX.current = e.clientX;
                 }}
@@ -805,6 +809,11 @@ export default function App() {
                 <button className="link-btn" onClick={reset}>
                   elsewhere
                 </button>
+                {copyFailed && (
+                  <span className="copy-note" role="status">
+                    couldn’t copy — the address bar has the link
+                  </span>
+                )}
               </div>
               {lastSignalNote && (
                 <p className="note dim">last signal on the dial</p>

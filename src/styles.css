@@ -38,26 +38,33 @@ body {
   flex-direction: column;
 }
 
-.top {
-  display: flex;
-  align-items: baseline;
-  justify-content: flex-end;
-  gap: 16px;
-  border-bottom: 1px solid rgba(242, 238, 227, 0.12);
-  padding-bottom: 14px;
-}
-
-.top-right {
-  display: flex;
-  align-items: baseline;
-  gap: 18px;
-}
-
-.top-sub {
+.stage-sub {
+  position: absolute;
+  left: 14px;
+  top: 26px;
   font-family: var(--mono);
-  font-size: 11px;
+  font-size: 9px;
+  letter-spacing: 0.1em;
   color: var(--slate-2);
-  letter-spacing: 0.04em;
+  opacity: 0.55;
+  pointer-events: none;
+  z-index: 3;
+}
+
+/* The utilities ride on the instrument, not a masthead. */
+.stage-ctl {
+  position: absolute;
+  top: 10px;
+  right: 12px;
+  display: flex;
+  gap: 6px;
+  z-index: 4;
+}
+
+.stage-ctl .snd {
+  background: rgba(10, 11, 16, 0.6);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
 }
 
 .snd {
@@ -788,7 +795,7 @@ input:focus-visible,
   .shell {
     padding: 16px 18px 26px;
   }
-  .top-sub {
+  .stage-sub {
     display: none;
   }
   .hero {
@@ -938,6 +945,47 @@ input:focus-visible,
     display: inline-flex;
     align-items: center;
     border-bottom-color: transparent;
+  }
+  /* The complaint rides above the thumb bar rather than squeezing it. */
+  .controls .copy-note {
+    position: absolute;
+    bottom: calc(100% + 6px);
+    left: 16px;
+    margin-left: 0;
+    white-space: normal;
+  }
+  /* Tuned stack: the dial answers the station name directly; the
+     technical readouts fall in below it. */
+  .ph-tuned .card {
+    display: flex;
+    flex-direction: column;
+  }
+  .ph-tuned .card > .dial-lesson-slot {
+    order: 3;
+  }
+  .ph-tuned .card > .dial-wrap {
+    order: 4;
+  }
+  .ph-tuned .card > .scope {
+    order: 5;
+  }
+  .ph-tuned .card > .scope-note {
+    order: 6;
+  }
+  .ph-tuned .card > .station-meta {
+    order: 7;
+  }
+  .ph-tuned .card > .distance {
+    order: 8;
+  }
+  .ph-tuned .card > .bore-line {
+    order: 9;
+  }
+  .ph-tuned .card > .note {
+    order: 10;
+  }
+  .ph-tuned .card > .there {
+    order: 11;
   }
   /* The pinned transport owns the bottom edge — the credits step aside. */
   .ph-tuned .foot {
@@ -1093,6 +1141,18 @@ input:focus-visible,
   min-height: 0;
 }
 
+/* Once the lesson has lived here, the slot keeps its box — the dial
+   never moves mid-gesture because a hint left. */
+.dial-lesson-slot.held {
+  min-height: 46px;
+}
+
+.guide.fading,
+.guide-row.fading {
+  opacity: 0;
+  transition: opacity 0.5s ease;
+}
+
 .dial-lesson-slot:not(:empty) {
   margin: -2px 0 8px;
 }
@@ -1136,6 +1196,18 @@ input:focus-visible,
   color: var(--signal);
   border-color: rgba(255, 77, 0, 0.7);
   animation: tip-in 200ms var(--ease-out);
+}
+
+/* …and says it in words — a red tint alone is a riddle on touch. */
+.copy-note {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.05em;
+  color: var(--signal);
+  align-self: center;
+  margin-left: 4px;
+  animation: tip-in 200ms var(--ease-out);
+  white-space: nowrap;
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -7,3 +7,4 @@ dist/
 video/raw/
 video/node_modules/
 tsconfig.tsbuildinfo
+raw/

@@ -92,21 +92,24 @@ export function Guide({ phase, globeTouched, dialTouched, onDone }: Props) {
   const tipRef = useRef<HTMLDivElement>(null);
   const learnedRef = useRef(false);
   learnedRef.current = globeTouched || ix > 0;
+  // Dismissals dissolve in place — the in-flow dial row keeps its box for
+  // the session, but a hard unmount mid-gesture would still steal the
+  // ring around the tuner's edge.
+  const [fading, setFading] = useState(false);
 
-  const finish = () => {
-    if (done.current) return;
-    done.current = true;
+  const dismiss = (learned: boolean) => {
+    if (done.current || fading) return;
+    setFading(true);
     markGuideSeen();
-    onDone(true); // opted out or completed — suppress the quiet hint
+    window.setTimeout(() => {
+      done.current = true;
+      onDone(learned);
+    }, 520);
   };
-  const bowOut = () => {
-    if (done.current) return;
-    done.current = true;
-    markGuideSeen();
-    // A timeout is dismissal, not failure — the hint survives only if the
-    // visitor genuinely never touched the planet.
-    onDone(learnedRef.current);
-  };
+  const finish = () => dismiss(true); // opted out or completed — kill the hint
+  // A timeout is dismissal, not failure — the hint survives only if the
+  // visitor genuinely never touched the planet.
+  const bowOut = () => dismiss(learnedRef.current);
 
   // Absolute leash: however the steps stall (an idle visitor, a target
   // that never appears), the guide bows out within a minute.
@@ -197,7 +200,7 @@ export function Guide({ phase, globeTouched, dialTouched, onDone }: Props) {
   }
   const tipY = !rect
     ? vh / 2
-    : step.inside
+    : step.inside && vw > 720 // inside-bottom reads as a callout on the planet — on small stages it would cover it
       ? Math.max(12, rect.y + rect.h - tipH - 10)
       : step.above || below + tipH >= vh
         ? Math.max(12, rect.y - 14 - tipH)
@@ -206,7 +209,7 @@ export function Guide({ phase, globeTouched, dialTouched, onDone }: Props) {
   const slot = step.inline ? document.querySelector(".dial-lesson-slot") : null;
 
   return (
-    <div className="guide">
+    <div className={`guide${fading ? " fading" : ""}`}>
       {rect && step.ring === "arc" ? (
         <GuideArc rect={rect} />
       ) : (
@@ -224,7 +227,7 @@ export function Guide({ phase, globeTouched, dialTouched, onDone }: Props) {
       )}
       {rect && slot ? (
         createPortal(
-          <div className="guide-row" role="status">
+          <div className={`guide-row${fading ? " fading" : ""}`} role="status">
             <span className="guide-row-dot" aria-hidden="true" />
             <p>{step.text}</p>
             <button className="guide-skip" onClick={finish}>
