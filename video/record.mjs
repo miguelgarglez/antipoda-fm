@@ -21,13 +21,17 @@ await page.waitForFunction(
   () => document.querySelector(".onair")?.textContent?.includes("ON AIR"),
   { timeout: 30000 },
 );
+// Let the tuned state breathe: scope moving, card settled.
+await page.waitForTimeout(6000);
+
+// Work the dial for a beat — arrow-key retune shows the needle snap.
+await page.locator(".dial").focus();
+await page.keyboard.press("ArrowRight");
 await page.waitForTimeout(4500);
 
-// Move to the next signal for a beat of the dial working.
-await page.click('button:has-text("Another signal")');
-await page.waitForTimeout(3500);
-
-await page.waitForTimeout(1500);
+// Back to idle — the reset closes the loop.
+await page.click('button:has-text("ELSEWHERE")').catch(() => null);
+await page.waitForTimeout(2500);
 const video = page.video();
 await ctx.close();
 await browser.close();
