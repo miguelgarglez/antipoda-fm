@@ -88,6 +88,13 @@ export class Player {
     return this.analyser !== null || this.meter !== null;
   }
 
+  /** Where the meter's data comes from right now — a test hook. */
+  get meterKind(): "element" | "decode" | "none" {
+    if (this.meter) return "decode";
+    if (this.analyser) return "element";
+    return "none";
+  }
+
   /** Latest time-domain samples, or null when the stream can't be analysed. */
   getWave(): Float32Array | null {
     const m = this.meter?.getWave();
@@ -130,7 +137,18 @@ export class Player {
   private async setupRoute(want: boolean, token: number): Promise<void> {
     if (want && this.elemDead) {
       // The element path proved silent earlier this session — skip the
-      // wasted graph and go straight to the decode meter.
+      // wasted re-wire and go straight to the decode meter. The graph,
+      // if one is still attached, still carries the audio out, so the
+      // context itself must be kept recovered.
+      const actx = this.actx;
+      if (actx && actx.state !== "running") {
+        try {
+          await Promise.race([actx.resume(), new Promise((r) => setTimeout(r, 350))]);
+        } catch {
+          /* stays suspended */
+        }
+      }
+      if (token !== this.attempt) return;
       void this.engageMeter();
       return;
     }
@@ -257,7 +275,7 @@ export class Player {
     if (this.watchTimer !== null) return;
     this.silentTicks = 0;
     this.lastCT = -1;
-    this.watchTimer = window.setInterval(() => this.watchTick(), 600);
+    this.watchTimer = window.setInterval(() => this.watchTick(), 450);
   }
 
   private disarmWatch() {
@@ -271,14 +289,23 @@ export class Player {
   private watchTick() {
     const an = this.analyser;
     const buf = this.waveBuf;
-    if (!an || !buf || !this.live || this.audio.paused) {
+    if (
+      !an ||
+      !buf ||
+      !this.live ||
+      this.audio.paused ||
+      this.actx?.state !== "running"
+    ) {
       this.silentTicks = 0;
       return;
     }
     const ct = this.audio.currentTime;
     const advancing = this.lastCT >= 0 && ct > this.lastCT + 0.05;
     this.lastCT = ct;
-    if (!advancing) return;
+    if (!advancing) {
+      this.silentTicks = 0;
+      return;
+    }
     an.getFloatTimeDomainData(buf);
     let peak = 0;
     for (let i = 0; i < buf.length; i++) peak = Math.max(peak, Math.abs(buf[i]));
@@ -286,6 +313,9 @@ export class Player {
       this.silentTicks = 0;
       return;
     }
+    // Exact zeros across four advancing checks while the context runs.
+    // Worst case for a rare truly-silent broadcast: the decode meter takes
+    // over and reports the same truth — an upgrade, not a lie.
     if (++this.silentTicks >= 4) {
       this.elemDead = true;
       this.disarmWatch();
@@ -300,30 +330,29 @@ export class Player {
    */
   private async engageMeter() {
     const url = this.lastUrl;
-    if (!this.wantGraph || !url || this.lastHls || this.meter) {
-      if (this.wantGraph && url && this.lastHls && !this.meter) this.onMeter(false);
+    if (!this.wantGraph || !url || this.meter) return;
+    if (this.lastHls || /\.m3u8(\?|$)/i.test(url)) {
+      this.onMeter(false);
       return;
     }
     const att = this.attempt;
     const meter = new StreamMeter();
+    // Own it before starting: pause/retune/dispose must reach the pending
+    // fetch, and a failure during startup must not strand it.
+    this.meter = meter;
     meter.onDead = () => {
       if (this.meter === meter) {
         this.meter = null;
-        this.onMeter(false);
+        if (this.attempt === att) this.onMeter(false);
       }
     };
     const ok = await meter.start(url);
-    // A newer play attempt took over, or a meter engaged meanwhile —
-    // retire this one rather than leave a second fetch running.
-    if (att !== this.attempt || this.meter) {
+    if (att !== this.attempt || this.meter !== meter || !ok) {
+      if (this.meter === meter) this.meter = null;
       meter.stop();
+      if (!ok && att === this.attempt) this.onMeter(false);
       return;
     }
-    if (!ok) {
-      this.onMeter(false);
-      return;
-    }
-    this.meter = meter;
     this.onMeter(true);
   }
 
@@ -353,6 +382,10 @@ export class Player {
     this.halt();
     this.lastUrl = url;
     this.lastHls = isHls;
+    // A new stream gets a fresh chance at the element path — silence on the
+    // last station must not permanently retire an analyser that would work
+    // here. On WebKit the watchdog simply re-proves the engine quirk.
+    this.elemDead = false;
     await this.setupRoute(this.wantGraph, token);
     if (token !== this.attempt) return;
     // Fetch CORS-mode whenever the probe passed — even if the graph is not

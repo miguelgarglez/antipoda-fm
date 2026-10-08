@@ -5,6 +5,7 @@ type Props = {
   index: number; // currently tuned detent
   sweeping: boolean; // resolver still searching — needle roams
   live: boolean; // station actually playing — green is earned by audio
+  names?: string[]; // candidate names — shown under the needle while dragging
   onSelect: (i: number) => void;
   onMove?: () => void; // called while the needle travels (static sound hook)
   onLock?: () => void; // called when the needle settles on a detent
@@ -20,7 +21,7 @@ const PAD = 14; // px inside the track
  * damped spring that glides, overshoots a hair, and settles like a real
  * tuner. Noise speckle density follows needle speed.
  */
-export function Dial({ count, index, sweeping, live, onSelect, onMove, onLock, label }: Props) {
+export function Dial({ count, index, sweeping, live, names, onSelect, onMove, onLock, label }: Props) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const st = useRef({
@@ -38,6 +39,7 @@ export function Dial({ count, index, sweeping, live, onSelect, onMove, onLock, l
     count,
     index,
     sweeping,
+    names,
     speckle: [] as { x: number; y: number; a: number }[],
     magIx: -1, // detent the needle is magnetically snapped to while dragging
     pid: null as number | null, // the one pointer owning the drag
@@ -51,6 +53,7 @@ export function Dial({ count, index, sweeping, live, onSelect, onMove, onLock, l
   st.current.index = index;
   st.current.sweeping = sweeping;
   st.current.live = live;
+  st.current.names = names;
 
   const detentX = useCallback((i: number, w: number) => {
     if (st.current.count <= 1) return w / 2;
@@ -184,25 +187,55 @@ export function Dial({ count, index, sweeping, live, onSelect, onMove, onLock, l
       ctx.stroke();
     }
 
-    // Needle with travel trail.
+    // Needle with travel trail and a grip tab — the finger has something
+    // to hold, not just a line to chase.
     if (s.x > 0) {
       const dir = s.v > 0 ? -1 : 1;
       const trailLen = Math.min(70, Math.abs(s.v) * 18 + (s.dragging ? 26 : 0));
       if (trailLen > 2) {
         const g = ctx.createLinearGradient(s.x + dir * trailLen, 0, s.x, 0);
-        g.addColorStop(0, "rgba(255,77,0,0)");
-        g.addColorStop(1, "rgba(255,77,0,0.45)");
+        g.addColorStop(0, "rgba(242,238,227,0)");
+        g.addColorStop(1, "rgba(242,238,227,0.22)");
         ctx.fillStyle = g;
         ctx.fillRect(Math.min(s.x + dir * trailLen, s.x), top + 1, trailLen, bot - top - 2);
       }
       const locked = s.settled && !s.sweeping;
       // Green means audible signal — a settled selection that is still
-      // connecting stays orange until playback actually starts.
-      ctx.fillStyle = locked && s.live ? "rgba(124,255,178,0.95)" : "#FF4D00";
-      ctx.fillRect(s.x - 1, top - 3, 2, bot - top + 6);
+      // connecting stays bone until playback actually starts.
+      ctx.fillStyle = locked && s.live ? "rgba(124,255,178,0.95)" : "rgba(242,238,227,0.9)";
+      ctx.fillRect(s.x - 1, top - 3, 2, bot - top + 3);
       if (locked && s.live) {
         ctx.fillStyle = "rgba(124,255,178,0.25)";
         ctx.fillRect(s.x - 4, top + 1, 8, bot - top - 2);
+      }
+      // The grip: a knurled tab hanging off the track's lower edge.
+      const gy = bot + 2;
+      ctx.fillStyle = s.dragging ? "rgba(242,238,227,0.22)" : "rgba(242,238,227,0.1)";
+      ctx.fillRect(s.x - 6, gy, 12, 11);
+      ctx.strokeStyle = s.dragging ? "rgba(242,238,227,0.85)" : "rgba(242,238,227,0.45)";
+      ctx.lineWidth = 1;
+      ctx.strokeRect(s.x - 6.5, gy + 0.5, 13, 10);
+      for (const dx of [-3, 0, 3]) {
+        ctx.beginPath();
+        ctx.moveTo(s.x + dx, gy + 2.5);
+        ctx.lineTo(s.x + dx, gy + 8.5);
+        ctx.stroke();
+      }
+    }
+
+    // While dragging, the name under the needle is the preview — you hear
+    // it before you commit to it.
+    const names = s.names;
+    if (s.dragging && names && names.length) {
+      const i = s.magIx >= 0 ? s.magIx : nearestDetent(s.dragX, w);
+      const nm = names[i];
+      if (nm) {
+        ctx.font = "10.5px 'IBM Plex Mono', monospace";
+        ctx.textBaseline = "top";
+        ctx.textAlign = "center";
+        ctx.fillStyle = "rgba(242,238,227,0.9)";
+        const tx = Math.min(Math.max(s.x, 80), w - 80);
+        ctx.fillText(nm.length > 26 ? nm.slice(0, 25) + "…" : nm, tx, 1);
       }
     }
 
@@ -211,9 +244,15 @@ export function Dial({ count, index, sweeping, live, onSelect, onMove, onLock, l
     ctx.textBaseline = "top";
     ctx.fillStyle = "rgba(152,161,184,0.85)";
     ctx.textAlign = "left";
-    ctx.fillText(s.sweeping ? "SWEEPING THE BAND…" : `SIG ${s.index + 1}/${s.count}`, 2, 2);
-    ctx.textAlign = "right";
-    ctx.fillText("DRAG TO TUNE", w - 2, 2);
+    ctx.fillText(
+      s.sweeping ? "SWEEPING THE BAND…" : `STATION ${s.index + 1} OF ${s.count}`,
+      5,
+      2,
+    );
+    if (!s.dragging) {
+      ctx.textAlign = "right";
+      ctx.fillText("DRAG TO TUNE", w - 5, 2);
+    }
 
     // Keep animating while anything moves; once settled this frame is
     // final. Reduced motion never holds a live loop — even mid-sweep.

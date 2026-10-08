@@ -70,7 +70,7 @@ const BORE_T = {
   openAt: 180, // ms after boreStart — boreStart itself trails the shots
   openDur: 320,
   travelAt: 460,
-  travelDur: 1500, // the crossing is the event — the prelude defers to it
+  travelDur: 1900, // the crossing is the event — long enough to read the layers
   hold: 90,
   resealDur: 240,
 };
@@ -241,10 +241,9 @@ export function Globe({ axis, origin, antipode, locked, boring, armed, onBoreCom
         // into a dot — off-axis keeps the through-planet line legible.
         const tiltAx = norm(cross(s.antipode, up));
         const aim = qRot(qAxis(tiltAx, 0.7), s.antipode); // ~40° off — the chord keeps ~64% of the visible diameter
-        queueShots([
-          { at: now + 120, dur: 1050, q1: qLookAt(aim, up), z1: 1.2 },
-          { at: now + 120 + 1050 + 620, dur: 720, q1: qLookAt(aim, up), z1: 1 },
-        ]);
+        // One arrival move — no zoom out and back. The planet settles at
+        // its resting size and stays there.
+        queueShots([{ at: now + 120, dur: 1150, q1: qLookAt(aim, up), z1: 1 }]);
       }
     }
     s.dirty = true;
@@ -819,6 +818,22 @@ export function Globe({ axis, origin, antipode, locked, boring, armed, onBoreCom
         if (face <= 0) return;
         ctx.save();
         ctx.globalAlpha = face;
+        // Named anchors — a rotation can never confuse which end is you
+        // and which is the far side.
+        if (morph < 0.02) {
+          ctx.font = "9.5px 'IBM Plex Mono', monospace";
+          ctx.fillStyle =
+            kind === "origin" ? "rgba(242,238,227,0.75)" : "rgba(255,77,0,0.8)";
+          const nx = (p.x - cx) / (Math.hypot(p.x - cx, p.y - cy) || 1);
+          const ny = (p.y - cy) / (Math.hypot(p.x - cx, p.y - cy) || 1);
+          ctx.textAlign = nx >= 0 ? "left" : "right";
+          ctx.textBaseline = "middle";
+          ctx.fillText(
+            kind === "origin" ? "you" : "antipode",
+            p.x + nx * 12,
+            p.y + ny * 12,
+          );
+        }
         if (kind === "origin") {
           ctx.beginPath();
           ctx.arc(p.x, p.y, 3, 0, Math.PI * 2);
@@ -930,6 +945,21 @@ export function Globe({ axis, origin, antipode, locked, boring, armed, onBoreCom
           ctx.arc(p.x, p.y, 2.2, 0, Math.PI * 2);
           ctx.fillStyle = "rgba(255,77,0,0.55)";
           ctx.fill();
+        }
+        // Label the pair — the premise is a relationship, so its two ends
+        // are named even before the visitor has picked a place.
+        ctx.font = "9.5px 'IBM Plex Mono', monospace";
+        ctx.globalAlpha = 0.8;
+        for (const [p, txt, col] of [
+          [a0, "you", "rgba(242,238,227,0.8)"],
+          [a1, "the far side", "rgba(255,77,0,0.85)"],
+        ] as const) {
+          const nx = (p.x - cx) / (Math.hypot(p.x - cx, p.y - cy) || 1);
+          const ny = (p.y - cy) / (Math.hypot(p.x - cx, p.y - cy) || 1);
+          ctx.fillStyle = col;
+          ctx.textAlign = nx >= 0 ? "left" : "right";
+          ctx.textBaseline = "middle";
+          ctx.fillText(txt, p.x + nx * 10, p.y + ny * 10);
         }
         // A pulse rides the diameter on a slow cycle — this is
         // transmission through the body, not decoration. The very first

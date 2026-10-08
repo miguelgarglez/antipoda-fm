@@ -9,6 +9,7 @@
   --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
   --mono: "IBM Plex Mono", ui-monospace, monospace;
   --serif: "Fraunces", Georgia, serif;
+  --disp: "Space Grotesk", var(--serif);
 }
 
 * {
@@ -26,71 +27,82 @@ body {
 }
 
 ::selection {
-  background: rgba(255, 77, 0, 0.35);
+  background: rgba(124, 255, 178, 0.28);
 }
 
 .shell {
   min-height: 100dvh;
-  max-width: 1240px;
+  max-width: 980px;
   margin: 0 auto;
-  padding: 22px 40px 18px;
+  padding: 14px 28px 14px;
   display: flex;
   flex-direction: column;
 }
 
-.stage-sub {
-  position: absolute;
-  left: 14px;
-  top: 26px;
-  font-family: var(--mono);
-  font-size: 9px;
-  letter-spacing: 0.1em;
-  color: var(--slate-2);
-  opacity: 0.55;
-  pointer-events: none;
-  z-index: 3;
-}
+/* ---- topbar: wordmark + instrument keys in one dedicated row ---- */
 
-/* The utilities ride on the instrument, not a masthead. */
-.stage-ctl {
-  position: absolute;
-  top: 10px;
-  right: 12px;
+.topbar {
   display: flex;
-  gap: 6px;
-  z-index: 4;
+  align-items: center;
+  gap: 16px;
+  padding: 2px 0 10px;
 }
 
-.stage-ctl .snd {
-  background: rgba(10, 11, 16, 0.6);
-  backdrop-filter: blur(6px);
-  -webkit-backdrop-filter: blur(6px);
-}
-
-.snd {
+.wordmark {
   font-family: var(--mono);
-  font-size: 10px;
-  letter-spacing: 0.18em;
+  font-size: 15px;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  color: var(--bone);
+}
+
+.wordmark-dot {
+  font-style: normal;
+  color: var(--signal);
+}
+
+.topbar-tag {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  letter-spacing: 0.03em;
   color: var(--slate-2);
-  background: transparent;
-  border: 1px solid rgba(90, 100, 120, 0.45);
-  border-radius: 999px;
-  padding: 4px 11px;
+}
+
+.topbar-ctl {
+  margin-left: auto;
+  display: flex;
+  gap: 8px;
+}
+
+/* Small rectangular deck keys — the receiver's own control vocabulary. */
+.snd,
+.key {
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  color: var(--slate-2);
+  background: rgba(242, 238, 227, 0.03);
+  border: 1px solid rgba(90, 100, 120, 0.5);
+  border-radius: 3px;
+  padding: 8px 13px;
   cursor: pointer;
   transition:
     color 100ms ease,
     border-color 100ms ease,
-    transform 80ms var(--ease-out);
+    transform 80ms var(--ease-out),
+    background-color 100ms ease;
 }
 
 @media (hover: hover) and (pointer: fine) {
-  .snd:hover {
+  .snd:hover,
+  .key:hover {
     color: var(--bone);
     border-color: rgba(242, 238, 227, 0.5);
   }
 }
 
-.snd:active {
+.snd:active,
+.key:active {
   transform: scale(0.96);
 }
 
@@ -99,21 +111,51 @@ body {
   border-color: rgba(124, 255, 178, 0.5);
 }
 
+/* ---- hero: planet centered, receiver docked beneath ---- */
+
 .hero {
   flex: 1;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(340px, 470px);
-  gap: 56px;
+  display: flex;
+  flex-direction: column;
   align-items: center;
+  justify-content: center;
+  gap: 22px;
   min-height: 0;
 }
 
 .stage {
   position: relative;
-  width: min(56vh, 540px);
+  width: min(40vh, 380px);
   max-width: 100%;
   aspect-ratio: 1;
-  margin: 0 auto;
+  flex: none;
+  transition: width 420ms var(--ease-in-out);
+}
+
+/* The crossing is the spectacle — give the opened planet room. */
+.stage.boring {
+  width: min(44vh, 420px);
+}
+
+/* Once the signal is locked the planet steps back — the receiver is the
+   instrument now, and a tuned page still fits a 600px-tall screen. */
+.stage.on {
+  width: min(30vh, 290px);
+}
+
+@media (max-height: 700px) and (min-width: 521px) {
+  .stage {
+    width: min(30vh, 320px);
+  }
+  .stage.boring {
+    width: min(37vh, 380px);
+  }
+  .stage.on {
+    width: min(20vh, 230px);
+  }
+  .hero {
+    gap: 12px;
+  }
 }
 
 .globe {
@@ -124,13 +166,15 @@ body {
   touch-action: none;
 }
 
+/* Origin and destination ride outside the disc silhouette, pinned to its
+   poles with fixed clearance — chrome never crosses the coastlines. */
 .dial-caption {
   position: absolute;
   inset: 0;
   pointer-events: none;
   font-family: var(--mono);
-  font-size: 10px;
-  letter-spacing: 0.14em;
+  font-size: 10.5px;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
 }
 
@@ -140,21 +184,19 @@ body {
   left: 50%;
   transform: translateX(-50%);
   white-space: nowrap;
-  max-width: 92%;
+  max-width: 130%;
   overflow: hidden;
   text-overflow: ellipsis;
   transition: opacity 400ms ease;
 }
 
 .dial-you {
-  /* Below the nameplate row — on small stages a centered caption reaches
-     the left edge and collides with the stage tag otherwise. */
-  top: max(46px, 9%);
-  color: rgba(242, 238, 227, 0.75);
+  top: -26px;
+  color: rgba(242, 238, 227, 0.85);
 }
 
 .dial-far {
-  bottom: 2%;
+  bottom: -26px;
   color: var(--signal);
 }
 
@@ -165,21 +207,21 @@ body {
 
 .idle-hints {
   position: absolute;
-  bottom: -4%;
+  bottom: -30px;
   left: 0;
   right: 0;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 2px;
+  gap: 3px;
   pointer-events: none;
 }
 
 .earth-hint {
   margin: 0;
   font-family: var(--mono);
-  font-size: 10.5px;
-  letter-spacing: 0.16em;
+  font-size: 11px;
+  letter-spacing: 0.1em;
   text-transform: uppercase;
   color: var(--signal);
   opacity: 0;
@@ -188,16 +230,15 @@ body {
 
 @keyframes hint-in {
   to {
-    opacity: 0.85;
+    opacity: 0.9;
   }
 }
 
 .drag-hint {
   font-family: var(--mono);
-  font-size: 10px;
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
-  color: var(--slate-2);
+  font-size: 11.5px;
+  letter-spacing: 0.06em;
+  color: var(--bone);
   background: none;
   border: 0;
   padding: 6px;
@@ -208,50 +249,58 @@ body {
 
 @keyframes hint-breathe {
   50% {
-    opacity: 0.45;
+    opacity: 0.5;
   }
 }
 
 .panel {
-  width: 100%;
+  width: min(720px, 100%);
   position: relative;
   z-index: 2;
 }
 
+/* ---- idle ---- */
+
+.intro {
+  text-align: center;
+}
+
 .intro h1 {
-  font-size: clamp(1.9rem, 3.4vw, 2.9rem);
-  font-weight: 300;
-  line-height: 1.14;
-  margin: 0 0 18px;
-  letter-spacing: -0.01em;
+  font-family: var(--disp);
+  font-size: clamp(1.85rem, 4.2vw, 2.8rem);
+  font-weight: 500;
+  line-height: 1.16;
+  margin: 0 0 16px;
+  letter-spacing: -0.015em;
 }
 
 .lede {
-  font-size: 1.05rem;
-  line-height: 1.55;
-  color: rgba(242, 238, 227, 0.72);
-  margin: 0 0 28px;
-  max-width: 46ch;
+  font-family: var(--mono);
+  font-size: 13.5px;
+  line-height: 1.7;
+  color: rgba(242, 238, 227, 0.78);
+  margin: 0 auto 26px;
+  max-width: 52ch;
 }
 
 .actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 12px;
-  align-items: center;
+  gap: 18px;
+  align-items: end;
+  justify-content: center;
 }
 
 .btn {
   font-family: var(--mono);
-  font-size: 12px;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
+  font-size: 12.5px;
+  letter-spacing: 0.05em;
   color: var(--bone);
   background: transparent;
   border: 1px solid rgba(242, 238, 227, 0.28);
-  padding: 12px 18px;
+  padding: 13px 20px;
   cursor: pointer;
-  border-radius: 2px;
+  border-radius: 999px;
   transition:
     transform 80ms var(--ease-out),
     background-color 100ms ease,
@@ -276,27 +325,19 @@ body {
   transform: none;
 }
 
+/* The action that turns the planet is the powered one — signal green,
+   not journey orange. */
 .btn.primary {
-  background: var(--signal);
-  border-color: var(--signal);
-  color: #14060a;
+  background: var(--phosphor);
+  border-color: var(--phosphor);
+  color: #08130c;
+  font-weight: 500;
 }
 
 @media (hover: hover) and (pointer: fine) {
   .btn.primary:hover {
-    background: #ff5c14;
-    border-color: #ff5c14;
-  }
-}
-
-.btn.ghost {
-  border-color: transparent;
-  color: var(--slate-2);
-}
-
-@media (hover: hover) and (pointer: fine) {
-  .btn.ghost:hover {
-    color: var(--bone);
+    background: #93ffc2;
+    border-color: #93ffc2;
   }
 }
 
@@ -306,36 +347,41 @@ input:focus-visible,
 .dial:focus-visible {
   outline: 2px solid var(--phosphor);
   outline-offset: 3px;
-  border-radius: 2px;
-}
-
-/* the ring keys keep a ring-shaped focus mark */
-.play-btn:focus-visible,
-.icon-btn:focus-visible {
-  border-radius: 50%;
+  border-radius: 3px;
 }
 
 .search {
   position: relative;
   flex: 1;
-  min-width: 200px;
-  max-width: 280px;
+  min-width: 220px;
+  max-width: 300px;
+  text-align: left;
+}
+
+.search-label {
+  display: block;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--slate-2);
+  margin-bottom: 2px;
 }
 
 .search input {
   width: 100%;
   font-family: var(--mono);
-  font-size: 13px;
+  font-size: 13.5px;
   color: var(--bone);
   background: transparent;
   border: 0;
-  border-bottom: 1px solid rgba(242, 238, 227, 0.28);
-  padding: 12px 2px;
-  caret-color: var(--signal);
+  border-bottom: 1px solid rgba(242, 238, 227, 0.34);
+  padding: 10px 2px;
+  caret-color: var(--phosphor);
 }
 
 .search input::placeholder {
-  color: var(--slate-2);
+  color: var(--slate);
 }
 
 .search input:focus {
@@ -356,9 +402,10 @@ input:focus-visible,
   list-style: none;
   background: #10131c;
   border: 1px solid rgba(242, 238, 227, 0.14);
-  border-radius: 3px;
+  border-radius: 4px;
   z-index: 10;
   box-shadow: 0 18px 40px rgba(0, 0, 0, 0.55);
+  text-align: left;
 }
 
 .place-list button {
@@ -385,15 +432,14 @@ input:focus-visible,
   background: rgba(242, 238, 227, 0.08);
 }
 
-/* Starting points as a sentence of links, not a row of capsules — the
-   places belong to the copy, not to a control pattern. */
+/* Starting points as a sentence of links, not a row of capsules. */
 .quick {
-  margin-top: 20px;
+  margin: 20px 0 0;
   font-family: var(--mono);
-  font-size: 12px;
-  letter-spacing: 0.04em;
+  font-size: 12.5px;
+  letter-spacing: 0.03em;
   color: var(--slate-2);
-  line-height: 2.1;
+  line-height: 2;
 }
 
 .quick-sep {
@@ -403,10 +449,10 @@ input:focus-visible,
 
 .place-link {
   font: inherit;
-  color: rgba(242, 238, 227, 0.85);
+  color: rgba(242, 238, 227, 0.88);
   background: none;
   border: 0;
-  border-bottom: 1px solid rgba(242, 238, 227, 0.3);
+  border-bottom: 1px solid rgba(242, 238, 227, 0.32);
   padding: 0 0 1px;
   cursor: pointer;
   transition:
@@ -416,8 +462,8 @@ input:focus-visible,
 
 @media (hover: hover) and (pointer: fine) {
   .place-link:hover {
-    color: var(--signal);
-    border-bottom-color: var(--signal);
+    color: var(--phosphor);
+    border-bottom-color: var(--phosphor);
   }
 }
 
@@ -426,89 +472,52 @@ input:focus-visible,
   font-size: 11.5px;
   color: var(--slate-2);
   line-height: 1.6;
-  margin: 10px 0 0;
+  margin: 0;
 }
 
-.scope-note {
-  font-family: var(--mono);
-  font-size: 10.5px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: rgba(152, 161, 184, 0.85);
-  margin: 4px 0 2px;
-  text-align: right;
-}
-
-.note.dim {
-  opacity: 0.7;
-}
-
-.tuning .log {
-  list-style: none;
-  margin: 24px 0 0;
-  padding: 0;
-  font-family: var(--mono);
-  font-size: 13px;
-  color: var(--slate-2);
-}
-
-.tuning .log li {
-  padding: 5px 0;
-  animation: log-in 260ms var(--ease-out) backwards;
-}
-
-@keyframes log-in {
-  from {
-    opacity: 0;
-    transform: translateY(6px);
-  }
-}
-
-.tuning .log li.cur {
+.note b {
   color: var(--bone);
+  font-weight: 400;
 }
 
-.tuning .log li.cur::after {
-  content: " ▍";
-  color: var(--signal);
-  animation: blink 0.9s steps(2) infinite;
-}
+/* ---- the receiver: one panel for head, nameplate, scope, dial ---- */
 
-@keyframes blink {
-  50% {
-    opacity: 0;
-  }
-}
-
-.card {
+.receiver {
+  width: 100%;
+  border: 1px solid rgba(242, 238, 227, 0.15);
+  border-radius: 10px;
+  background:
+    linear-gradient(180deg, rgba(242, 238, 227, 0.05), rgba(242, 238, 227, 0.015));
+  box-shadow:
+    inset 0 1px 0 rgba(242, 238, 227, 0.06),
+    0 24px 60px rgba(0, 0, 0, 0.45);
   animation: card-in 220ms var(--ease-out) backwards;
 }
 
 @keyframes card-in {
   from {
     opacity: 0;
-    transform: translateY(6px);
+    transform: translateY(8px);
   }
 }
 
-.onair {
-  font-family: var(--mono);
-  font-size: 11px;
-  letter-spacing: 0.28em;
-  color: var(--slate-2);
+.rx-head {
   display: flex;
   align-items: center;
-  gap: 9px;
+  gap: 12px;
+  padding: 11px 14px;
+  border-bottom: 1px solid rgba(242, 238, 227, 0.1);
 }
 
-.onair .dot {
-  width: 7px;
-  height: 7px;
+.rx-lamp {
+  width: 8px;
+  height: 8px;
+  flex: none;
   border-radius: 50%;
   background: var(--slate);
 }
 
-.onair .dot.on {
+.rx-lamp.on {
   background: var(--phosphor);
   box-shadow: 0 0 12px rgba(124, 255, 178, 0.7);
   animation: pulse 1.8s ease-in-out infinite;
@@ -520,36 +529,93 @@ input:focus-visible,
   }
 }
 
-/* The station name is the tuner's identification plate — a window on
-   the instrument itself, flush against the dial's top edge. */
-.dial-plate {
-  border: 1px solid rgba(242, 238, 227, 0.16);
-  border-bottom: none;
-  padding: 7px 10px 6px;
-  background: rgba(242, 238, 227, 0.025);
-  margin-top: 10px;
+.rx-state {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  letter-spacing: 0.22em;
+  color: var(--bone);
+}
+
+.rx-count {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  letter-spacing: 0.03em;
+  color: var(--slate-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+.rx-keys {
+  margin-left: auto;
+  display: flex;
+  gap: 8px;
+  flex: none;
+}
+
+/* The listen key is the powered key on the panel. */
+.key-play {
+  color: var(--bone);
+  border-color: rgba(124, 255, 178, 0.45);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .key-play:hover {
+    border-color: var(--phosphor);
+    color: var(--phosphor);
+  }
+}
+
+.key-play.on {
+  background: rgba(124, 255, 178, 0.12);
+  color: var(--phosphor);
+  border-color: var(--phosphor);
+}
+
+.key:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.key.bad {
+  color: var(--signal);
+  border-color: rgba(255, 77, 0, 0.7);
+}
+
+/* The nameplate: station first in the hierarchy, engraved on the plate. */
+.rx-plate {
+  padding: 12px 16px 8px;
+  overflow: hidden;
 }
 
 .station-name {
   position: relative;
-  /* Radio identification, not editorial serif: the name is set like the
-     engraved label on a receiver's tuner glass. */
   font-family: var(--mono);
-  font-size: clamp(0.95rem, 1.6vw, 1.2rem);
+  font-size: clamp(1.1rem, 2.1vw, 1.45rem);
   font-weight: 500;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.02em;
   line-height: 1.3;
   margin: 0;
-  /* Two lines reserved — a retune must never move the dial or scope. */
-  min-height: 2.6em;
+  /* Two lines reserved — a retune must never move the scope or dial. */
+  min-height: 2.4em;
 }
 
-.dial-wrap .dial {
-  margin-top: 0;
+.station-name.dim {
+  color: var(--slate-2);
 }
 
-/* Retunes crossfade in place: the outgoing name dissolves over the
-   incoming one — no entrance travel, no layout shift. */
+.rx-meta {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  letter-spacing: 0.02em;
+  color: var(--slate-2);
+  margin: 4px 0 0;
+  line-height: 1.6;
+}
+
+/* Retunes change in place through a clipped vertical slide — the plate
+   is a window the name passes through, never two names stacked. */
 .stn-new,
 .stn-old {
   display: -webkit-box;
@@ -559,7 +625,7 @@ input:focus-visible,
 }
 
 .stn-new {
-  animation: name-in 160ms ease-out backwards;
+  animation: name-in 220ms var(--ease-out) backwards;
 }
 
 .stn-old {
@@ -567,56 +633,70 @@ input:focus-visible,
   inset: 0 auto auto 0;
   width: 100%;
   pointer-events: none;
-  animation: name-out 160ms ease-in forwards;
+  animation: name-out 220ms var(--ease-in-out) forwards;
 }
 
 @keyframes name-in {
   from {
     opacity: 0;
+    transform: translateY(55%);
   }
 }
 
 @keyframes name-out {
   to {
     opacity: 0;
+    transform: translateY(-55%);
   }
 }
 
-.station-meta,
-.distance {
-  font-family: var(--mono);
-  font-size: 12px;
-  color: rgba(242, 238, 227, 0.68);
-  margin: 4px 0;
-  line-height: 1.7;
-}
-
-.distance {
-  color: var(--bone);
-  font-size: 13px;
-  margin-top: 10px;
-}
-
-.bore-line {
-  font-family: var(--mono);
-  font-size: 10.5px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--signal);
-  opacity: 0.8;
-  margin: 6px 0 0;
-}
-
+/* The scope is the receiver's glass — full-bleed dark strip. */
 .scope {
   display: block;
   width: 100%;
-  height: 44px;
-  margin-top: 16px;
+  height: 64px;
+  border-top: 1px solid rgba(242, 238, 227, 0.08);
+  border-bottom: 1px solid rgba(242, 238, 227, 0.08);
+  background: rgba(0, 0, 0, 0.28);
+}
+
+.scope-note {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  letter-spacing: 0.06em;
+  color: rgba(152, 161, 184, 0.9);
+  margin: 0;
+  padding: 7px 16px 0;
+}
+
+/* One current status line during the hunt — no accumulating log. */
+.rx-status {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--slate-2);
+  margin: 0;
+  padding: 2px 16px 12px;
+}
+
+.rx-status::after {
+  content: " ▍";
+  color: var(--signal);
+  animation: blink 0.9s steps(2) infinite;
+}
+
+@keyframes blink {
+  50% {
+    opacity: 0;
+  }
+}
+
+/* The dial is the receiver's bottom instrument strip. */
+.dial-wrap {
+  border-top: 1px solid rgba(242, 238, 227, 0.1);
 }
 
 .dial {
   width: 100%;
-  margin-top: 10px;
   outline-offset: 4px;
 }
 
@@ -628,121 +708,51 @@ input:focus-visible,
   touch-action: none;
 }
 
-.there {
-  font-family: var(--mono);
-  font-size: 11.5px;
-  color: var(--slate-2);
-  margin: 12px 0 0;
-  line-height: 1.6;
-}
-
-.there b {
-  color: var(--bone);
-  font-weight: 400;
-}
-
-.controls {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 14px;
-  margin-top: 20px;
-  align-items: center;
-}
-
-/* The transport is one instrument: a round key for the broadcast, a
-   quiet icon to carry the signal away, and a text link for a new origin. */
-.play-btn {
-  width: 56px;
-  height: 56px;
-  flex: none;
-  border-radius: 50%;
-  border: 1.5px solid var(--signal);
-  background: transparent;
-  color: var(--signal);
-  display: grid;
-  place-items: center;
-  cursor: pointer;
-  transition:
-    background 140ms ease,
-    color 140ms ease,
-    transform 120ms var(--ease-out),
-    border-color 140ms ease;
-}
-
-@media (hover: hover) and (pointer: fine) {
-  .play-btn:hover:not(:disabled) {
-    background: rgba(255, 77, 0, 0.12);
-    transform: scale(1.06);
-  }
-}
-
-.play-btn:active:not(:disabled) {
-  transform: scale(0.94);
-}
-
-.play-btn:disabled {
-  opacity: 0.45;
-  cursor: default;
-}
-
-/* While the broadcast runs, the ring fills — the key itself is on air. */
-.play-btn.on {
-  background: rgba(255, 77, 0, 0.14);
-  border-color: rgba(255, 122, 40, 0.9);
-}
-
-.icon-btn {
-  width: 42px;
-  height: 42px;
-  flex: none;
-  border-radius: 50%;
-  border: 1px solid rgba(242, 238, 227, 0.16);
-  background: none;
-  color: var(--slate-2);
-  display: grid;
-  place-items: center;
-  cursor: pointer;
-  transition:
-    color 120ms ease,
-    border-color 120ms ease;
-}
-
-@media (hover: hover) and (pointer: fine) {
-  .icon-btn:hover {
-    color: var(--bone);
-    border-color: rgba(242, 238, 227, 0.5);
-  }
-}
-
-.link-btn {
-  margin-left: auto;
+/* The one-line dial lesson — a whisper on the instrument, gone after
+   the first real drag. */
+.rx-hint {
   font-family: var(--mono);
   font-size: 11px;
-  letter-spacing: 0.12em;
+  letter-spacing: 0.04em;
   color: var(--slate-2);
-  background: none;
-  border: 0;
-  border-bottom: 1px solid rgba(90, 100, 120, 0.5);
-  padding: 2px 0;
-  cursor: pointer;
-  transition:
-    color 120ms ease,
-    border-color 120ms ease;
+  margin: 0;
+  padding: 4px 16px 10px;
+  text-align: center;
 }
 
-@media (hover: hover) and (pointer: fine) {
-  .link-btn:hover {
-    color: var(--bone);
-    border-bottom-color: var(--bone);
-  }
+.rx-foot {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 20px;
+  padding: 8px 16px 11px;
+  border-top: 1px solid rgba(242, 238, 227, 0.07);
+}
+
+/* While the instrument owns the column, credits step aside so the
+   composition never needs scroll on short desktop screens. */
+.ph-tuned .foot,
+.ph-tuning .foot {
+  display: none;
+}
+
+.copy-note {
+  color: var(--signal);
+}
+
+/* ---- failed ---- */
+
+.failed {
+  text-align: center;
 }
 
 .failed h2 {
+  font-family: var(--disp);
   font-size: 1.8rem;
-  font-weight: 300;
-  font-style: italic;
+  font-weight: 500;
   margin: 20px 0 10px;
 }
+
+/* ---- footer ---- */
 
 .foot {
   display: flex;
@@ -750,27 +760,12 @@ input:focus-visible,
   gap: 8px 24px;
   justify-content: space-between;
   border-top: 1px solid rgba(242, 238, 227, 0.12);
-  padding-top: 14px;
-  margin-top: 12px;
+  padding-top: 12px;
+  margin-top: 14px;
   font-family: var(--mono);
-  font-size: 10px;
-  letter-spacing: 0.06em;
+  font-size: 10.5px;
+  letter-spacing: 0.04em;
   color: var(--slate-2);
-}
-
-/* The name is engraved on the instrument itself, not spread across a
-   masthead — a small tag seated in the stage's upper edge. */
-.stage-tag {
-  position: absolute;
-  top: 10px;
-  left: 14px;
-  z-index: 4;
-  font-family: var(--mono);
-  font-size: 9.5px;
-  letter-spacing: 0.3em;
-  text-transform: uppercase;
-  color: rgba(242, 238, 227, 0.5);
-  pointer-events: none;
 }
 
 /* Credits fold into a disclosure — the attribution exists, but it is not
@@ -778,8 +773,6 @@ input:focus-visible,
 .sources summary {
   cursor: pointer;
   list-style: none;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
 }
 
 .sources summary::before {
@@ -810,22 +803,31 @@ input:focus-visible,
   white-space: nowrap;
 }
 
+/* ---- mobile ---- */
+
 @media (max-width: 960px) {
   .shell {
-    padding: 16px 18px 26px;
+    padding: 12px 16px 20px;
   }
-  .stage-sub {
+  .topbar {
+    padding-bottom: 4px;
+  }
+  .topbar-tag {
     display: none;
   }
+  .snd,
+  .key {
+    min-height: 44px;
+    padding: 10px 14px;
+  }
   .hero {
-    grid-template-columns: 1fr;
-    gap: 8px;
-    align-content: start;
+    gap: 16px;
+    justify-content: start;
   }
   /* The stage is a column: canvas window + captions + hints in flow,
-     so the destination name can never clip or crowd the headline. */
+     so the destination name can never clip or crowd the receiver. */
   .stage {
-    width: min(74vw, 280px);
+    width: min(72vw, 260px);
     height: auto;
     aspect-ratio: auto;
     display: flex;
@@ -834,32 +836,15 @@ input:focus-visible,
   }
   .stage .globe {
     width: 100%;
-    height: 200px;
+    height: 158px;
     flex: none;
     transition: height 320ms var(--ease-in-out);
   }
   .stage.boring {
-    width: min(82vw, 330px);
+    width: min(78vw, 300px);
   }
   .stage.boring .globe {
-    height: 252px;
-  }
-  .stage.on {
-    width: min(72vw, 260px);
-  }
-  .stage.on .globe {
-    height: 210px;
-  }
-  /* Names still reserve two lines on mobile — a retuned long name must
-     never shove the dial upward mid-gesture under the visitor's thumb. */
-  .station-name {
-    font-size: clamp(1.35rem, 6.4vw, 1.9rem);
-    min-height: 2.3em;
-  }
-  /* The antipode coordinate already sits in the destination caption —
-     repeating it in the card is noise on a small screen. */
-  .anti-coord {
-    display: none;
+    height: 200px;
   }
   /* Captions live in the flow below the window — the destination is
      content, not chrome, and must survive the small canvas. */
@@ -868,8 +853,8 @@ input:focus-visible,
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 3px;
-    padding: 6px 0 2px;
+    gap: 2px;
+    padding: 4px 0 0;
     text-align: center;
   }
   .dial-caption .dial-you,
@@ -889,130 +874,78 @@ input:focus-visible,
   }
   .idle-hints {
     position: static;
-    padding-bottom: 4px;
-  }
-  /* Thumb-sized targets: inline links pad their tap area vertically
-     without leaving the text flow. */
-  .place-link {
-    padding: 10px 0 9px;
-  }
-  .snd {
-    min-height: 44px;
-    padding: 10px 16px;
-  }
-  /* The signal-path line duplicates what the bore itself just showed —
-     on the small card it yields its line. */
-  .bore-line {
-    display: none;
-  }
-  /* The meter explanation must be comfortably readable on a phone. */
-  .scope-note {
-    font-size: 12px;
-    text-transform: none;
-    letter-spacing: 0.02em;
-    color: rgba(242, 238, 227, 0.8);
-    text-align: left;
+    padding: 4px 0 0;
   }
   .intro h1 {
-    font-size: clamp(1.6rem, 7vw, 2.1rem);
+    font-size: clamp(1.5rem, 7vw, 1.85rem);
+    margin-bottom: 10px;
   }
   .lede {
-    font-size: 1rem;
-    margin-bottom: 22px;
+    font-size: 12px;
+    margin-bottom: 14px;
   }
   .actions {
     flex-direction: column;
     align-items: stretch;
+    gap: 10px;
   }
   .search {
     max-width: none;
   }
-  .card {
-    /* clears the floating transport, including its safe-area inset */
-    padding-bottom: calc(78px + env(safe-area-inset-bottom));
+  .quick {
+    margin-top: 12px;
+    line-height: 1.9;
   }
-  /* Thumb bar: the transport is pinned to the bottom edge — one line,
-     48px touch targets, safe-area aware. */
-  .controls {
-    position: fixed;
-    bottom: 0;
-    left: 0;
-    right: 0;
-    z-index: 30;
-    flex-wrap: nowrap;
-    gap: 8px;
-    background: linear-gradient(
-      rgba(10, 11, 16, 0) 0%,
-      rgba(10, 11, 16, 0.92) 34%
-    );
-    backdrop-filter: blur(10px);
-    -webkit-backdrop-filter: blur(10px);
-    border-top: 1px solid rgba(242, 238, 227, 0.12);
-    padding: 14px 16px calc(12px + env(safe-area-inset-bottom));
-    margin: 0;
+  .place-link {
+    padding: 10px 0 9px;
   }
-  .controls .play-btn {
-    width: 52px;
-    height: 52px;
+  /* The head row wraps: keys get their own row under the status. */
+  .rx-head {
+    flex-wrap: wrap;
+    row-gap: 8px;
   }
-  .controls .icon-btn {
-    width: 46px;
-    height: 46px;
-  }
-  .controls .link-btn {
-    min-height: 46px;
-    display: inline-flex;
-    align-items: center;
-    border-bottom-color: transparent;
-  }
-  /* The complaint rides above the thumb bar rather than squeezing it. */
-  .controls .copy-note {
-    position: absolute;
-    bottom: calc(100% + 6px);
-    left: 16px;
+  .rx-keys {
+    flex-basis: 100%;
     margin-left: 0;
-    white-space: normal;
   }
-  /* Tuned stack: the dial answers the station name directly; the
-     technical readouts fall in below it. */
-  .ph-tuned .card {
-    display: flex;
+  .rx-keys .key {
+    flex: 1;
+  }
+  .station-name {
+    font-size: clamp(1.2rem, 6vw, 1.6rem);
+  }
+  /* The coordinate duplicates the destination caption visually, but the
+     caption is aria-hidden decoration — clip this one so screen readers
+     still get the coordinate. */
+  .anti-coord {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
+  /* The meter explanation must be comfortably readable on a phone. */
+  .scope-note {
+    font-size: 12px;
+    letter-spacing: 0.02em;
+    color: rgba(242, 238, 227, 0.8);
+  }
+  .rx-foot {
     flex-direction: column;
+    gap: 4px;
   }
-  .ph-tuned .card > .dial-lesson-slot {
-    order: 3;
+  /* Once tuned, the planet shrinks to a locator — its captions' facts
+     are already engraved on the receiver plate. */
+  .stage.on .globe {
+    height: 156px;
   }
-  .ph-tuned .card > .dial-wrap {
-    order: 4;
-  }
-  .ph-tuned .card > .scope {
-    order: 5;
-  }
-  .ph-tuned .card > .scope-note {
-    order: 6;
-  }
-  .ph-tuned .card > .station-meta {
-    order: 7;
-  }
-  .ph-tuned .card > .distance {
-    order: 8;
-  }
-  .ph-tuned .card > .bore-line {
-    order: 9;
-  }
-  .ph-tuned .card > .note {
-    order: 10;
-  }
-  .ph-tuned .card > .there {
-    order: 11;
-  }
-  /* The pinned transport owns the bottom edge — the credits step aside. */
-  .ph-tuned .foot {
+  .stage.on .dial-caption {
     display: none;
   }
 }
 
-/* ---- first-run guide ---- */
+/* ---- first-run guide (opt-in replay only) ---- */
 
 .guide {
   position: fixed;
@@ -1229,28 +1162,9 @@ input:focus-visible,
   animation: guide-pulse 2.6s ease-in-out infinite;
 }
 
-/* clipboard refused — the key flashes its complaint */
-.icon-btn.bad {
-  color: var(--signal);
-  border-color: rgba(255, 77, 0, 0.7);
-  animation: tip-in 200ms var(--ease-out);
-}
-
-/* …and says it in words — a red tint alone is a riddle on touch. */
-.copy-note {
-  font-family: var(--mono);
-  font-size: 10px;
-  letter-spacing: 0.05em;
-  color: var(--signal);
-  align-self: center;
-  margin-left: 4px;
-  animation: tip-in 200ms var(--ease-out);
-  white-space: nowrap;
-}
-
 @media (prefers-reduced-motion: reduce) {
-  .onair .dot.on,
-  .tuning .log li.cur::after,
+  .rx-lamp.on,
+  .rx-status::after,
   .drag-hint,
   .guide-ring,
   .guide-arc-path,
@@ -1258,17 +1172,15 @@ input:focus-visible,
   .guide-tip {
     animation: none;
   }
-  .tuning .log li,
   .card,
   .station-name,
-  .earth-hint {
+  .earth-hint,
+  .receiver {
     animation-duration: 1ms;
   }
   .btn,
   .snd,
-  .play-btn,
-  .icon-btn,
-  .link-btn,
+  .key,
   .place-link,
   .stage,
   .stage .globe {

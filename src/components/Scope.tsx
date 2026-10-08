@@ -19,6 +19,9 @@ type Props = {
 export function Scope({ player, active, connecting, metered = false, className }: Props) {
   const ref = useRef<HTMLCanvasElement>(null);
   const phase = useRef(0);
+  const lastWave = useRef<Float32Array | null>(null); // last real samples
+  const rest = useRef(0); // paused decay: 1 live trace → 0 quiet baseline
+  const gvdbg = new URLSearchParams(window.location.search).has("gvdbg");
 
   useEffect(() => {
     const canvas = ref.current!;
@@ -34,7 +37,10 @@ export function Scope({ player, active, connecting, metered = false, className }
       const w = canvas.getBoundingClientRect().width;
       const h = canvas.getBoundingClientRect().height;
       const mid = h / 2;
-      ctx.clearRect(0, 0, w, h);
+      // Phosphor persistence: the last frames die slowly instead of a
+      // hard clear, so a real trace leaves a faint ghost of itself.
+      ctx.fillStyle = "rgba(4,5,8,0.55)";
+      ctx.fillRect(0, 0, w, h);
 
       // Faint center line + edge ticks.
       ctx.strokeStyle = "rgba(242,238,227,0.09)";
@@ -49,7 +55,39 @@ export function Scope({ player, active, connecting, metered = false, className }
       ctx.moveTo(w - 0.5, 4); ctx.lineTo(w - 0.5, h - 4);
       ctx.stroke();
 
-      const wave = metered && (active || connecting) ? player?.getWave() ?? null : null;
+      const running = active || connecting;
+      // Pause is a physical act on the trace: the last real samples settle
+      // to a quiet baseline instead of the line vanishing mid-frame.
+      rest.current += ((running ? 1 : 0) - rest.current) * Math.min(1, dt * 6);
+
+      let wave = metered && running ? (player?.getWave() ?? null) : null;
+      if (wave) {
+        // Exact digital silence while ON AIR is a dead analyser, not a
+        // quiet broadcast — draw the live carrier until the real signal
+        // (or the honest unmetered note) replaces it. A flat green line
+        // reads as broken.
+        let silent = true;
+        for (let i = 0; i < wave.length; i += 7) {
+          if (Math.abs(wave[i]) > 1e-4) {
+            silent = false;
+            break;
+          }
+        }
+        if (silent) wave = null;
+        else lastWave.current = wave; // the player's buffer is stable while paused
+      }
+      // Paused: ghost the last waveform decaying to rest. Connecting or
+      // unmetered live never borrows old samples.
+      const ghost =
+        !running && !wave && lastWave.current && rest.current > 0.02
+          ? lastWave.current
+          : null;
+      if (gvdbg) {
+        (window as unknown as { __meter: unknown }).__meter = {
+          src: player?.meterKind ?? "none",
+          real: wave !== null,
+        };
+      }
       phase.current += dt;
 
       ctx.beginPath();
@@ -60,12 +98,14 @@ export function Scope({ player, active, connecting, metered = false, className }
       // trace plus a slow pulse sweeping the band. Alive enough to read as
       // signal, honest enough that it never pretends to be the audio.
       const pulseX = ((t * 0.11) % 1) * w;
+      const amp = wave ? 1 : ghost ? rest.current : 0;
+      const disp = wave ?? ghost;
       for (let i = 0; i <= n; i++) {
         const x = (i / n) * w;
         let v = 0;
-        if (wave) {
-          const s = wave[Math.floor((i / n) * (wave.length - 1))];
-          v = s * (h * 0.44);
+        if (disp) {
+          const s = disp[Math.floor((i / n) * (disp.length - 1))];
+          v = s * (h * 0.44) * amp;
         } else if (connecting) {
           // Searching: restless jitter.
           v = Math.sin(i * 43.7 + t * 60) * Math.sin(i * 7.3) * h * 0.1;
@@ -89,7 +129,9 @@ export function Scope({ player, active, connecting, metered = false, className }
         ? wave
           ? `rgba(124,255,178,${0.55 + Math.min(0.35, peak / (h || 1))})`
           : "rgba(124,255,178,0.32)"
-        : "rgba(255,77,0,0.35)";
+        : ghost
+          ? "rgba(124,255,178,0.28)"
+          : "rgba(152,161,184,0.25)";
       ctx.lineWidth = 1.2;
       ctx.stroke();
 
