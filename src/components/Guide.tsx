@@ -300,7 +300,9 @@ function GuideArc({ rect }: { rect: { x: number; y: number; w: number; h: number
       <g transform={`translate(${cx}, ${cy - r - 2})`}>
         <path d="M -6 3 L 0 -3 L 6 3" className="guide-arc-chev" />
       </g>
-      <g transform={`translate(${cx}, ${cy + r + 2}) rotate(180)`}>
+      {/* The lower chevron rides the lower-left limb so it stays clear of
+          the instruction card anchored under the disc. */}
+      <g transform={`translate(${cx - r * 0.72}, ${cy + r * 0.72}) rotate(135)`}>
         <path d="M -6 3 L 0 -3 L 6 3" className="guide-arc-chev" />
       </g>
     </svg>

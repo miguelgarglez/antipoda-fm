@@ -616,6 +616,10 @@ export function Globe({ axis, origin, antipode, locked, boring, armed, onBoreCom
           // Static opened planet until the resolver answers, then done.
           s.morphT = s.armed ? 0 : 1;
           s.probeT = 1;
+          if (!s.armed && !s.waitingNotified) {
+            s.waitingNotified = true;
+            s.onWaiting?.();
+          }
           if (s.armed) {
             s.boreDone = true;
             s.onBoreComplete?.();
