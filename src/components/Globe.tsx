@@ -43,6 +43,9 @@ const PHOSPHOR = "#7CFFB2";
 const NORTH: Vec3 = [0, 0, 1];
 
 const DRIFT = 0.05; // rad/s idle turntable spin (view space +y)
+const gvdbg =
+  typeof window !== "undefined" &&
+  new URLSearchParams(window.location.search).has("gvdbg");
 const ZOOM_MIN = 0.55;
 const ZOOM_MAX = 2.8;
 
@@ -378,9 +381,10 @@ export function Globe({ axis, origin, antipode, locked, boring, armed, onBoreCom
         s.zoom += (s.zoomT - s.zoom) * Math.min(1, 11 * dt);
         if (moving && dt > 0 && !s.pointers.size) {
           const sp = Math.hypot(s.wvel[0], s.wvel[1], s.wvel[2]);
+          if (gvdbg) (window as unknown as { __gv: number }).__gv = sp; // test hook
           if (sp > 0.015) {
             s.q = qNorm(qMul(qAxis(norm(s.wvel), sp * dt), s.q));
-            s.wvel = scale(s.wvel, Math.pow(0.06, dt));
+            s.wvel = scale(s.wvel, Math.pow(0.14, dt));
           } else {
             s.wvel = [0, 0, 0];
             s.q = qNorm(qMul(qAxis([0, 1, 0], DRIFT * dt), s.q));
