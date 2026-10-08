@@ -147,7 +147,9 @@ body {
 }
 
 .dial-you {
-  top: 2%;
+  /* Below the nameplate row — on small stages a centered caption reaches
+     the left edge and collides with the stage tag otherwise. */
+  top: max(46px, 9%);
   color: rgba(242, 238, 227, 0.75);
 }
 

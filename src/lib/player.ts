@@ -1,4 +1,5 @@
 import type Hls from "hls.js";
+import { StreamMeter } from "./stream-meter";
 
 export type PlayerState = "idle" | "connecting" | "playing" | "blocked" | "error";
 
@@ -32,6 +33,17 @@ export class Player {
   private wireOnGesture: (() => void) | null = null;
   private lastUrl: string | null = null;
   private lastHls = false;
+
+  // Some engines (WebKit) run the element's audio fine but return exact
+  // digital silence from MediaElementAudioSourceNode. A watchdog proves it:
+  // all-zero samples while audio advances for ~2.4 s. Once proven, this
+  // session skips the element path and a StreamMeter re-decodes the stream
+  // purely to feed the scope.
+  private meter: StreamMeter | null = null;
+  private elemDead = false;
+  private watchTimer: number | null = null;
+  private silentTicks = 0;
+  private lastCT = -1;
 
   constructor(onState: (s: PlayerState) => void, onMeter: (on: boolean) => void = () => {}) {
     this.onState = onState;
@@ -73,11 +85,13 @@ export class Player {
 
   /** True when the scope is drawing real audio data. */
   get analysing(): boolean {
-    return this.analyser !== null;
+    return this.analyser !== null || this.meter !== null;
   }
 
   /** Latest time-domain samples, or null when the stream can't be analysed. */
-  getWave(): Float32Array<ArrayBuffer> | null {
+  getWave(): Float32Array | null {
+    const m = this.meter?.getWave();
+    if (m) return m;
     if (!this.analyser || !this.waveBuf) return null;
     this.analyser.getFloatTimeDomainData(this.waveBuf);
     return this.waveBuf;
@@ -114,6 +128,12 @@ export class Player {
    * resume() may resolve long after a newer attempt took over.
    */
   private async setupRoute(want: boolean, token: number): Promise<void> {
+    if (want && this.elemDead) {
+      // The element path proved silent earlier this session — skip the
+      // wasted graph and go straight to the decode meter.
+      void this.engageMeter();
+      return;
+    }
     if (want && "AudioContext" in window) {
       if (!this.actx) this.actx = new AudioContext();
       // Whether or not the graph is already wired, a suspended or
@@ -150,7 +170,10 @@ export class Player {
         }
         // Replays must re-report: App resets metered=false on each tune,
         // and a reused graph would otherwise silently claim unmetered.
-        if (this.analyser) this.onMeter(true);
+        if (this.analyser) {
+          this.onMeter(true);
+          if (!this.meter && !this.elemDead) this.armWatch();
+        }
       } else {
         // The context needs a real user activation (the bore completes on
         // an animation frame, not a gesture). The stream was fetched with
@@ -197,7 +220,10 @@ export class Player {
             this.waveBuf = new Float32Array(this.analyser.fftSize);
             this.sourceNode.connect(this.analyser).connect(this.actx.destination);
           }
-          if (this.analyser) this.onMeter(true);
+          if (this.analyser) {
+            this.onMeter(true);
+            if (!this.meter && !this.elemDead) this.armWatch();
+          }
         } catch {
           /* element already sourced elsewhere — stay direct */
         }
@@ -219,6 +245,86 @@ export class Player {
     if (!fn) return;
     for (const ev of this.wireEvents) window.removeEventListener(ev, fn);
     this.wireOnGesture = null;
+  }
+
+  /**
+   * While the element graph is wired, watch for the dead-source signature:
+   * exact digital silence in the analyser while playback time advances.
+   * Real audio has a noise floor — literal zeros for four consecutive
+   * checks mean the engine is feeding the graph nothing.
+   */
+  private armWatch() {
+    if (this.watchTimer !== null) return;
+    this.silentTicks = 0;
+    this.lastCT = -1;
+    this.watchTimer = window.setInterval(() => this.watchTick(), 600);
+  }
+
+  private disarmWatch() {
+    if (this.watchTimer !== null) {
+      window.clearInterval(this.watchTimer);
+      this.watchTimer = null;
+    }
+    this.silentTicks = 0;
+  }
+
+  private watchTick() {
+    const an = this.analyser;
+    const buf = this.waveBuf;
+    if (!an || !buf || !this.live || this.audio.paused) {
+      this.silentTicks = 0;
+      return;
+    }
+    const ct = this.audio.currentTime;
+    const advancing = this.lastCT >= 0 && ct > this.lastCT + 0.05;
+    this.lastCT = ct;
+    if (!advancing) return;
+    an.getFloatTimeDomainData(buf);
+    let peak = 0;
+    for (let i = 0; i < buf.length; i++) peak = Math.max(peak, Math.abs(buf[i]));
+    if (peak > 1e-6) {
+      this.silentTicks = 0;
+      return;
+    }
+    if (++this.silentTicks >= 4) {
+      this.elemDead = true;
+      this.disarmWatch();
+      void this.engageMeter();
+    }
+  }
+
+  /**
+   * Decode the stream for the scope when the element path is dead. Only
+   * ever runs on CORS-cleared streams (wantGraph was probed); HLS and any
+   * container WebCodecs cannot read fall back to the honest carrier.
+   */
+  private async engageMeter() {
+    const url = this.lastUrl;
+    if (!this.wantGraph || !url || this.lastHls || this.meter) {
+      if (this.wantGraph && url && this.lastHls && !this.meter) this.onMeter(false);
+      return;
+    }
+    const att = this.attempt;
+    const meter = new StreamMeter();
+    meter.onDead = () => {
+      if (this.meter === meter) {
+        this.meter = null;
+        this.onMeter(false);
+      }
+    };
+    const ok = await meter.start(url);
+    // A newer play attempt took over, or a meter engaged meanwhile —
+    // retire this one rather than leave a second fetch running.
+    if (att !== this.attempt || this.meter) {
+      meter.stop();
+      return;
+    }
+    if (!ok) {
+      this.onMeter(false);
+      return;
+    }
+    this.meter = meter;
+    this.onMeter(true);
   }
 
   private teardownRoute() {
@@ -256,6 +362,8 @@ export class Player {
     this.audio.crossOrigin = this.wantGraph ? "anonymous" : null;
     this.live = true;
     this.set("connecting");
+    if (this.wantGraph && this.analyser && !this.meter && !this.elemDead)
+      this.armWatch();
     const hlsUrl = isHls || /\.m3u8(\?|$)/i.test(url);
     const nativeHls = this.audio.canPlayType("application/vnd.apple.mpegurl") !== "";
     try {
@@ -292,6 +400,11 @@ export class Player {
     // after the user has paused.
     this.attempt++;
     this.live = false;
+    this.disarmWatch();
+    if (this.meter) {
+      this.meter.stop();
+      this.meter = null;
+    }
     this.audio.pause();
     this.set("idle");
   }
@@ -309,6 +422,8 @@ export class Player {
     // context itself may also need resuming independently of the graph
     // (interrupted while away), which setupRoute handles either way.
     if (this.wantGraph) void this.setupRoute(true, token);
+    if (this.wantGraph && this.analyser && !this.meter && !this.elemDead)
+      this.armWatch();
     this.audio.play().catch((e) => {
       if (token === this.attempt && this.live) this.set(this.fail(e));
     });
@@ -316,6 +431,11 @@ export class Player {
 
   private halt() {
     this.live = false;
+    this.disarmWatch();
+    if (this.meter) {
+      this.meter.stop();
+      this.meter = null;
+    }
     if (this.stallTimer !== null) {
       window.clearTimeout(this.stallTimer);
       this.stallTimer = null;
