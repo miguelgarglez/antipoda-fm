@@ -24,6 +24,12 @@ type Step = {
   /** ms before the step lets go on its own — the guide never traps */
   timeout: number;
   onlyPhase?: string;
+  /** place the tip above the target when what sits below are controls */
+  above?: boolean;
+  /** anchor inside the target's bottom edge — a callout on the thing itself */
+  inside?: boolean;
+  /** clear this sibling's bottom edge too when placing below the target */
+  belowAfter?: string;
 };
 
 const STEPS: Step[] = [
@@ -32,18 +38,21 @@ const STEPS: Step[] = [
     text: "The planet is a body. Grab it, spin it — scroll or pinch to zoom.",
     timeout: 12000,
     onlyPhase: "idle",
+    inside: true, // below the stage sits its own caption; above it is header
   },
   {
     sel: ".actions",
     text: "Name a place, or press the orange key — the planet will open.",
     timeout: 15000,
     onlyPhase: "idle",
+    belowAfter: ".quick", // the chips are this step's controls — clear them
   },
   {
     sel: ".dial",
     text: "Every notch is a live signal near your antipode. Drag the needle.",
     timeout: 12000,
     onlyPhase: "tuned",
+    above: true, // the transport row below the dial is the app's controls
   },
 ];
 
@@ -137,10 +146,22 @@ export function Guide({ phase, globeTouched, dialTouched, onDone }: Props) {
   const vw = window.innerWidth;
   const vh = window.innerHeight;
   const tipW = Math.min(260, vw - 32);
+  const tipH = 118; // tip content height — measured generously
   const tipX = rect ? clamp(rect.x + rect.w / 2 - tipW / 2, 12, vw - tipW - 12) : vw / 2 - tipW / 2;
-  // Prefer below the target; flip above when the bottom edge is tight.
-  const below = rect ? rect.y + rect.h + 14 : vh / 2;
-  const tipY = rect && below + 90 < vh ? below : rect ? Math.max(12, rect.y - 14 - 90) : vh / 2;
+  // Prefer below the target; flip above when the bottom edge is tight or
+  // the step marks its underside as controls (the dial's transport row).
+  let below = rect ? rect.y + rect.h + 14 : vh / 2;
+  if (rect && step.belowAfter) {
+    const sib = document.querySelector(step.belowAfter);
+    if (sib) below = Math.max(below, sib.getBoundingClientRect().bottom + 14);
+  }
+  const tipY = !rect
+    ? vh / 2
+    : step.inside
+      ? Math.max(12, rect.y + rect.h - tipH - 10)
+      : step.above || below + tipH >= vh
+        ? Math.max(12, rect.y - 14 - tipH)
+        : below;
 
   return (
     <div className="guide">
