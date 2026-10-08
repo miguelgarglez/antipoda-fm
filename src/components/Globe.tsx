@@ -31,15 +31,6 @@ type Props = {
   axis: Vec3;
   origin: Vec3 | null;
   antipode: Vec3 | null;
-  /** The station the dial is auditioning — a second surface point,
-      distinct from the exact antipode marker. */
-  stationAt?: Vec3 | null;
-  /** The crossing's counter lives in the receiver column — written
-      into these spans each frame so it never overflows the porthole. */
-  boreOut?: React.RefObject<{
-    km: HTMLSpanElement | null;
-    layer: HTMLSpanElement | null;
-  }>;
   locked: boolean;
   /** Bore sequence: the disc opens into a cross-section while the probe descends. */
   boring: boolean;
@@ -79,7 +70,7 @@ const BORE_T = {
   openAt: 180, // ms after boreStart — boreStart itself trails the shots
   openDur: 320,
   travelAt: 460,
-  travelDur: 1900, // the crossing is the event — long enough to read the layers
+  travelDur: 1500, // the crossing is the event — the prelude defers to it
   hold: 90,
   resealDur: 240,
 };
@@ -144,7 +135,7 @@ function qAxisUp(axis: Vec3, facingHint: Vec3): Quat {
 
 type Shot = { at: number; dur: number; q1: Quat; z1: number };
 
-export function Globe({ axis, origin, antipode, stationAt, boreOut, locked, boring, armed, onBoreComplete, onInteract, className }: Props) {
+export function Globe({ axis, origin, antipode, locked, boring, armed, onBoreComplete, onInteract, className }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const state = useRef({
     q: HOME_Q as Quat,
@@ -181,7 +172,6 @@ export function Globe({ axis, origin, antipode, stationAt, boreOut, locked, bori
     axis,
     origin,
     antipode,
-    stationAt: stationAt ?? null as Vec3 | null,
     onBoreComplete,
     onInteract,
   });
@@ -192,7 +182,6 @@ export function Globe({ axis, origin, antipode, stationAt, boreOut, locked, bori
   s.axis = axis;
   s.origin = origin;
   s.antipode = antipode;
-  s.stationAt = stationAt ?? null;
   s.onBoreComplete = onBoreComplete;
   s.onInteract = onInteract;
 
@@ -252,9 +241,10 @@ export function Globe({ axis, origin, antipode, stationAt, boreOut, locked, bori
         // into a dot — off-axis keeps the through-planet line legible.
         const tiltAx = norm(cross(s.antipode, up));
         const aim = qRot(qAxis(tiltAx, 0.7), s.antipode); // ~40° off — the chord keeps ~64% of the visible diameter
-        // One arrival move — no zoom out and back. The planet settles at
-        // its resting size and stays there.
-        queueShots([{ at: now + 120, dur: 1150, q1: qLookAt(aim, up), z1: 1 }]);
+        queueShots([
+          { at: now + 120, dur: 1050, q1: qLookAt(aim, up), z1: 1.2 },
+          { at: now + 120 + 1050 + 620, dur: 720, q1: qLookAt(aim, up), z1: 1 },
+        ]);
       }
     }
     s.dirty = true;
@@ -293,7 +283,7 @@ export function Globe({ axis, origin, antipode, stationAt, boreOut, locked, bori
     }
     s.dirty = true;
     s.requestDraw();
-  }, [origin, antipode, stationAt, locked]);
+  }, [origin, antipode, locked]);
 
   useEffect(() => {
     const canvas = canvasRef.current!;
@@ -594,13 +584,6 @@ export function Globe({ axis, origin, antipode, stationAt, boreOut, locked, bori
         ctx.fill();
       }
 
-      // The porthole aperture: nothing the planet does may paint over
-      // the bezel — a punch-in reads as the world looming through glass.
-      ctx.save();
-      ctx.beginPath();
-      ctx.arc(cx, cy, baseR * 1.1, 0, Math.PI * 2);
-      ctx.clip();
-
       // Bore morph: 0 = wireframe planet, 1 = opened cross-section. The
       // timeline is wall-clock staged; only the reseal waits on `armed`.
       if (s.boring && !s.boreDone) {
@@ -828,37 +811,6 @@ export function Globe({ axis, origin, antipode, stationAt, boreOut, locked, bori
       ctx.lineWidth = morph > 0.5 ? 1.4 : 1;
       ctx.stroke();
 
-      // Surface labels must live inside the porthole — the measured text
-      // bounds are clamped within the limb, growing toward the center,
-      // never under the bezel.
-      const edgeLabel = (p: P, txt: string) => {
-        const nx = (p.x - cx) / (Math.hypot(p.x - cx, p.y - cy) || 1);
-        const ny = (p.y - cy) / (Math.hypot(p.x - cx, p.y - cy) || 1);
-        const tw = ctx.measureText(txt).width;
-        // The text grows inward from the anchor; its far end is the
-        // anchor. Clamp the anchor so the far end stays inside the limb.
-        const cap = Math.max(R * 0.55, Math.hypot(R * R - (R * 0.3) ** 2) - 6);
-        let lx = p.x + nx * 11;
-        let ly = p.y + ny * 11;
-        const ld = Math.hypot(lx - cx, ly - cy);
-        if (ld > cap) {
-          lx = cx + ((lx - cx) / ld) * cap;
-          ly = cy + ((ly - cy) / ld) * cap;
-        }
-        // If the near (marker-side) end still pokes out, slide the whole
-        // run inward along the normal.
-        ctx.textAlign = nx >= 0 ? "right" : "left";
-        const endx = nx >= 0 ? lx - tw : lx + tw;
-        const endd = Math.hypot(endx - cx, ly - cy);
-        if (endd > R - 4) {
-          const pull = endd - (R - 4);
-          lx -= nx * pull;
-          ly -= ny * pull;
-        }
-        ctx.textBaseline = "middle";
-        ctx.fillText(txt, lx, ly);
-      };
-
       // Markers. In the opened section they sit at the cut's ends; on the
       // solid planet they track the real surface points and fade at limb.
       const drawMarker = (v: Vec3, kind: "origin" | "anti") => {
@@ -867,14 +819,6 @@ export function Globe({ axis, origin, antipode, stationAt, boreOut, locked, bori
         if (face <= 0) return;
         ctx.save();
         ctx.globalAlpha = face;
-        // Named anchors — a rotation can never confuse which end is you
-        // and which is the far side.
-        if (morph < 0.02) {
-          ctx.font = "9.5px 'IBM Plex Mono', monospace";
-          ctx.fillStyle =
-            kind === "origin" ? "rgba(242,238,227,0.75)" : "rgba(255,77,0,0.8)";
-          edgeLabel(p, kind === "origin" ? "you" : "antipode");
-        }
         if (kind === "origin") {
           ctx.beginPath();
           ctx.arc(p.x, p.y, 3, 0, Math.PI * 2);
@@ -895,19 +839,10 @@ export function Globe({ axis, origin, antipode, stationAt, boreOut, locked, bori
           ctx.arc(p.x, p.y, 16 * glow, 0, Math.PI * 2);
           ctx.fillStyle = g;
           ctx.fill();
-          // The exact point is a survey mark — a hollow crosshair, so the
-          // solid station pip beside it can never be mistaken for it.
-          ctx.strokeStyle = ORANGE;
-          ctx.lineWidth = 1.4;
           ctx.beginPath();
-          ctx.arc(p.x, p.y, 4.4, 0, Math.PI * 2);
-          ctx.stroke();
-          ctx.beginPath();
-          for (const [dx, dy] of [[0, -1], [1, 0], [0, 1], [-1, 0]] as const) {
-            ctx.moveTo(p.x + dx * 5.6, p.y + dy * 5.6);
-            ctx.lineTo(p.x + dx * 8.4, p.y + dy * 8.4);
-          }
-          ctx.stroke();
+          ctx.arc(p.x, p.y, 3.6, 0, Math.PI * 2);
+          ctx.fillStyle = ORANGE;
+          ctx.fill();
           if (s.locked && !reduced) {
             const ph = (t % 1.8) / 1.8;
             ctx.beginPath();
@@ -973,38 +908,6 @@ export function Globe({ axis, origin, antipode, stationAt, boreOut, locked, bori
           }
           drawMarker(s.origin, "origin");
           drawMarker(s.antipode, "anti");
-          // The auditioned station: a bone pip tethered to the exact
-          // point, so the "nearest" relationship is visible on the body,
-          // not just in metadata.
-          if (s.stationAt) {
-            const ps = proj(s.stationAt);
-            const sface = clamp01((ps.z + 0.12) / 0.3);
-            const aface = clamp01((pa.z + 0.12) / 0.3);
-            if (sface > 0) {
-              ctx.save();
-              ctx.globalAlpha = sface;
-              if (aface > 0) {
-                ctx.setLineDash([2, 4]);
-                ctx.strokeStyle = "rgba(242,238,227,0.4)";
-                ctx.lineWidth = 1;
-                ctx.beginPath();
-                ctx.moveTo(pa.x, pa.y);
-                ctx.lineTo(ps.x, ps.y);
-                ctx.stroke();
-                ctx.setLineDash([]);
-              }
-              ctx.beginPath();
-              ctx.arc(ps.x, ps.y, 3.2, 0, Math.PI * 2);
-              ctx.fillStyle = "#fff1e0";
-              ctx.fill();
-              ctx.beginPath();
-              ctx.arc(ps.x, ps.y, 6, 0, Math.PI * 2);
-              ctx.strokeStyle = "rgba(242,238,227,0.55)";
-              ctx.lineWidth = 1;
-              ctx.stroke();
-              ctx.restore();
-            }
-          }
         }
       } else if (morph < 0.02) {
         // No tune yet: the premise drawn on the object itself — a faint
@@ -1027,17 +930,6 @@ export function Globe({ axis, origin, antipode, stationAt, boreOut, locked, bori
           ctx.arc(p.x, p.y, 2.2, 0, Math.PI * 2);
           ctx.fillStyle = "rgba(255,77,0,0.55)";
           ctx.fill();
-        }
-        // Label the pair — the premise is a relationship, so its two ends
-        // are named even before the visitor has picked a place.
-        ctx.font = "9.5px 'IBM Plex Mono', monospace";
-        ctx.globalAlpha = 0.8;
-        for (const [p, txt, col] of [
-          [a0, "you", "rgba(242,238,227,0.8)"],
-          [a1, "the far side", "rgba(255,77,0,0.85)"],
-        ] as const) {
-          ctx.fillStyle = col;
-          edgeLabel(p, txt);
         }
         // A pulse rides the diameter on a slow cycle — this is
         // transmission through the body, not decoration. The very first
@@ -1093,26 +985,22 @@ export function Globe({ axis, origin, antipode, stationAt, boreOut, locked, bori
           ctx.restore();
       }
 
-      // Progress counter — written into the receiver column, never the
-      // porthole: distance crossed is the headline (a whole planet is
-      // the claim); depth below the nearest surface rides underneath.
-      {
-        const bo = boreOut?.current;
-        if (bo?.km) {
-          if (s.boring && morph > 0.1) {
-            const crossed = Math.round(s.probeT * DIAMETER_KM).toLocaleString("en-US");
-            const d = Math.min(s.probeT, 1 - s.probeT);
-            const depth = Math.round(d * DIAMETER_KM).toLocaleString("en-US");
-            bo.km.textContent = `${crossed} / ${DIAMETER_KM.toLocaleString("en-US")} km`;
-            if (bo.layer) bo.layer.textContent = `depth ${depth} km · ${layerAt(s.probeT)}`;
-          } else {
-            bo.km.textContent = "";
-            if (bo.layer) bo.layer.textContent = "";
-          }
-        }
+      // Progress counter under the disc while boring — distance crossed
+      // is the headline (a whole planet is the claim); depth below the
+      // nearest surface rides underneath, falling back to 0 on exit.
+      if (s.boring && s.probeT >= 0 && morph > 0.5) {
+        const crossed = Math.round(s.probeT * DIAMETER_KM).toLocaleString("en-US");
+        const d = Math.min(s.probeT, 1 - s.probeT);
+        const depth = Math.round(d * DIAMETER_KM).toLocaleString("en-US");
+        ctx.textAlign = "center";
+        const textY = Math.min(cy + R + 34, h - 8);
+        ctx.font = "24px 'IBM Plex Mono', monospace";
+        ctx.fillStyle = "rgba(242,238,227,0.95)";
+        ctx.fillText(`${crossed} / ${DIAMETER_KM.toLocaleString("en-US")} km`, cx, textY - 16);
+        ctx.font = "11px 'IBM Plex Mono', monospace";
+        ctx.fillStyle = "rgba(152,161,184,0.9)";
+        ctx.fillText(`depth ${depth} km · ${layerAt(s.probeT)}`, cx, textY + 4);
       }
-
-      ctx.restore(); // porthole aperture
 
       // In reduced-motion mode, draw once per change then idle. The armed
       // flip re-enters through requestDraw, so a waiting probe can rest here.
@@ -1143,7 +1031,7 @@ export function Globe({ axis, origin, antipode, stationAt, boreOut, locked, bori
       canvas.removeEventListener("wheel", onWheel);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [origin, antipode, stationAt, locked]);
+  }, [origin, antipode, locked]);
 
   return (
     <canvas

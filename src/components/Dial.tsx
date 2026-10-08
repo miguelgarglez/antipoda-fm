@@ -5,9 +5,7 @@ type Props = {
   index: number; // currently tuned detent
   sweeping: boolean; // resolver still searching — needle roams
   live: boolean; // station actually playing — green is earned by audio
-  names?: string[]; // candidate names — shown under the needle while dragging
   onSelect: (i: number) => void;
-  onPreview?: (i: number) => void; // candidate under the needle, -1 when released
   onMove?: () => void; // called while the needle travels (static sound hook)
   onLock?: () => void; // called when the needle settles on a detent
   label: string; // aria description of the current detent
@@ -22,7 +20,7 @@ const PAD = 14; // px inside the track
  * damped spring that glides, overshoots a hair, and settles like a real
  * tuner. Noise speckle density follows needle speed.
  */
-export function Dial({ count, index, sweeping, live, names, onSelect, onPreview, onMove, onLock, label }: Props) {
+export function Dial({ count, index, sweeping, live, onSelect, onMove, onLock, label }: Props) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const st = useRef({
@@ -40,7 +38,6 @@ export function Dial({ count, index, sweeping, live, names, onSelect, onPreview,
     count,
     index,
     sweeping,
-    names,
     speckle: [] as { x: number; y: number; a: number }[],
     magIx: -1, // detent the needle is magnetically snapped to while dragging
     pid: null as number | null, // the one pointer owning the drag
@@ -48,16 +45,12 @@ export function Dial({ count, index, sweeping, live, names, onSelect, onPreview,
     burstT: [] as number[], // their timer ids — cleared on cancel/unmount
     lastT: 0, // frame clock for dt-normalized physics
     acc: 0, // pending seconds for the fixed-substep spring solver
-    flashIx: -1, // detent that just locked — flashes its notch
-    flashUntil: 0,
-    prevIx: -1, // candidate last reported to onPreview — single source
     live,
   });
   st.current.count = count;
   st.current.index = index;
   st.current.sweeping = sweeping;
   st.current.live = live;
-  st.current.names = names;
 
   const detentX = useCallback((i: number, w: number) => {
     if (st.current.count <= 1) return w / 2;
@@ -151,8 +144,6 @@ export function Dial({ count, index, sweeping, live, names, onSelect, onPreview,
       onMove?.();
     }
     if (!wasSettled && s.settled && !s.sweeping && !s.dragging) {
-      s.flashIx = s.index;
-      s.flashUntil = now + 320;
       onLock?.();
       navigator.vibrate?.(8);
     }
@@ -181,13 +172,6 @@ export function Dial({ count, index, sweeping, live, names, onSelect, onPreview,
     for (let i = 0; i < s.count; i++) {
       const x = detentX(i, w);
       const cur = i === s.index;
-      // A detent that just locked flashes its notch — the landing is
-      // visible, not only audible.
-      if (i === s.flashIx && now < s.flashUntil) {
-        const f = (s.flashUntil - now) / 320;
-        ctx.fillStyle = `rgba(124,255,178,${0.3 * f})`;
-        ctx.fillRect(x - 4, top + 1, 8, bot - top - 2);
-      }
       ctx.strokeStyle = cur
         ? s.live
           ? "rgba(124,255,178,0.75)"
@@ -200,78 +184,36 @@ export function Dial({ count, index, sweeping, live, names, onSelect, onPreview,
       ctx.stroke();
     }
 
-    // Needle with travel trail and a grip tab — the finger has something
-    // to hold, not just a line to chase.
+    // Needle with travel trail.
     if (s.x > 0) {
       const dir = s.v > 0 ? -1 : 1;
       const trailLen = Math.min(70, Math.abs(s.v) * 18 + (s.dragging ? 26 : 0));
       if (trailLen > 2) {
         const g = ctx.createLinearGradient(s.x + dir * trailLen, 0, s.x, 0);
-        g.addColorStop(0, "rgba(242,238,227,0)");
-        g.addColorStop(1, "rgba(242,238,227,0.22)");
+        g.addColorStop(0, "rgba(255,77,0,0)");
+        g.addColorStop(1, "rgba(255,77,0,0.45)");
         ctx.fillStyle = g;
         ctx.fillRect(Math.min(s.x + dir * trailLen, s.x), top + 1, trailLen, bot - top - 2);
       }
       const locked = s.settled && !s.sweeping;
       // Green means audible signal — a settled selection that is still
-      // connecting stays bone until playback actually starts.
-      ctx.fillStyle = locked && s.live ? "rgba(124,255,178,0.95)" : "rgba(242,238,227,0.9)";
-      ctx.fillRect(s.x - 1, top - 3, 2, bot - top + 3);
+      // connecting stays orange until playback actually starts.
+      ctx.fillStyle = locked && s.live ? "rgba(124,255,178,0.95)" : "#FF4D00";
+      ctx.fillRect(s.x - 1, top - 3, 2, bot - top + 6);
       if (locked && s.live) {
         ctx.fillStyle = "rgba(124,255,178,0.25)";
         ctx.fillRect(s.x - 4, top + 1, 8, bot - top - 2);
       }
-      // The grip: a knurled thumb riding the track's lower edge — wide
-      // enough to read as the thing you hold, not a tick you chase.
-      const gy = bot + 1;
-      ctx.beginPath();
-      ctx.roundRect(s.x - 13, gy, 26, 13, 3);
-      ctx.fillStyle = s.dragging
-        ? "rgba(242,238,227,0.34)"
-        : "rgba(242,238,227,0.14)";
-      ctx.fill();
-      ctx.strokeStyle = s.dragging
-        ? "rgba(242,238,227,0.95)"
-        : "rgba(242,238,227,0.5)";
-      ctx.lineWidth = 1;
-      ctx.stroke();
-      for (const dx of [-6, 0, 6]) {
-        ctx.beginPath();
-        ctx.moveTo(s.x + dx, gy + 3.5);
-        ctx.lineTo(s.x + dx, gy + 9.5);
-        ctx.stroke();
-      }
     }
 
-    // While dragging, the name under the needle is the preview — you hear
-    // it before you commit to it. The same index drives the globe pip and
-    // this label, so the two can never disagree.
-    const names = s.names;
-    if (s.dragging && names && names.length) {
-      const i = s.magIx >= 0 ? s.magIx : nearestDetent(s.dragX, w);
-      const nm = names[i];
-      if (nm) {
-        ctx.font = "12px 'IBM Plex Mono', monospace";
-        ctx.textBaseline = "top";
-        ctx.textAlign = "center";
-        ctx.fillStyle = "rgba(242,238,227,0.9)";
-        const tx = Math.min(Math.max(s.x, 84), w - 84);
-        const role = i === s.index ? "playing" : "release to tune";
-        const short = nm.length > 16 ? nm.slice(0, 15) + "…" : nm;
-        ctx.fillText(`${role} · ${i + 1}/${s.count} · ${short}`, tx, 1);
-      }
-    }
-
-    // Chrome text — the detent readout; the step keys carry the how-to.
-    ctx.font = "11px 'IBM Plex Mono', monospace";
+    // Chrome text.
+    ctx.font = "10.5px 'IBM Plex Mono', monospace";
     ctx.textBaseline = "top";
-    ctx.fillStyle = "rgba(152,161,184,0.9)";
+    ctx.fillStyle = "rgba(152,161,184,0.85)";
     ctx.textAlign = "left";
-    ctx.fillText(
-      s.sweeping ? "SWEEPING THE BAND…" : `STATION ${s.index + 1} OF ${s.count}`,
-      6,
-      2,
-    );
+    ctx.fillText(s.sweeping ? "SWEEPING THE BAND…" : `SIG ${s.index + 1}/${s.count}`, 2, 2);
+    ctx.textAlign = "right";
+    ctx.fillText("DRAG TO TUNE", w - 2, 2);
 
     // Keep animating while anything moves; once settled this frame is
     // final. Reduced motion never holds a live loop — even mid-sweep.
@@ -307,16 +249,6 @@ export function Dial({ count, index, sweeping, live, names, onSelect, onPreview,
     return Math.min(r.width, Math.max(0, e.clientX - r.left));
   };
 
-  // The candidate the drag label names is also the candidate the globe
-  // previews — one source of truth for both surfaces.
-  const reportPreview = (ix: number) => {
-    const s = st.current;
-    if (ix !== s.prevIx) {
-      s.prevIx = ix;
-      onPreview?.(ix);
-    }
-  };
-
   const onPointerDown = (e: React.PointerEvent) => {
     if (count < 1 || st.current.pid !== null) return; // one active pointer
     const s = st.current;
@@ -325,7 +257,6 @@ export function Dial({ count, index, sweeping, live, names, onSelect, onPreview,
     s.dragX = posFromEvent(e);
     s.lastX = s.dragX;
     s.clickBurst = 0;
-    reportPreview(nearestDetent(s.dragX, s.w));
     canvasRef.current!.setPointerCapture(e.pointerId);
     kick();
   };
@@ -349,7 +280,6 @@ export function Dial({ count, index, sweeping, live, names, onSelect, onPreview,
         s.magIx = -1;
       }
     }
-    reportPreview(s.magIx >= 0 ? s.magIx : nearestDetent(x, s.w));
     // Fast drags may jump over detents between events — each crossing
     // still earns its click, staggered so it reads as a sequence.
     const lo = Math.min(s.lastX, x);
@@ -377,13 +307,11 @@ export function Dial({ count, index, sweeping, live, names, onSelect, onPreview,
     s.pid = null;
     s.magIx = -1;
     s.clickBurst = 0;
-    reportPreview(-1);
     const i = nearestDetent(s.dragX, s.w);
     if (i !== index) onSelect(i);
     kick();
   };
-  // A cancelled gesture — including a lost pointer capture — restores
-  // the tuned detent instead of retuning or staying stuck dragging.
+  // A cancelled gesture restores the tuned detent instead of retuning.
   const onPointerCancel = () => {
     const s = st.current;
     if (!s.dragging) return;
@@ -391,7 +319,6 @@ export function Dial({ count, index, sweeping, live, names, onSelect, onPreview,
     s.pid = null;
     s.magIx = -1;
     s.clickBurst = 0;
-    reportPreview(-1);
     for (const t of s.burstT) window.clearTimeout(t);
     s.burstT = [];
     kick();
@@ -439,7 +366,6 @@ export function Dial({ count, index, sweeping, live, names, onSelect, onPreview,
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
         onPointerCancel={onPointerCancel}
-        onLostPointerCapture={onPointerCancel}
       />
     </div>
   );

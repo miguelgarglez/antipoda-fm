@@ -4,25 +4,11 @@
 import { GeoPoint } from "./geo-math";
 
 export type There = {
-  tz: string; // IANA zone at the antipode — the clock keeps moving
+  time: string; // "12:15" local
   tempC: number;
   phrase: string;
   isDay: boolean;
 };
-
-/** Current local time at the antipode, "05:45". */
-export function thereTime(tz: string): string {
-  try {
-    return new Intl.DateTimeFormat("en-GB", {
-      hour: "2-digit",
-      minute: "2-digit",
-      hour12: false,
-      timeZone: tz,
-    }).format(new Date());
-  } catch {
-    return "";
-  }
-}
 
 const WMO: Record<number, string> = {
   0: "clear sky",
@@ -70,13 +56,12 @@ export async function fetchThere(p: GeoPoint): Promise<There | null> {
     }
     if (!res.ok) return null;
     const data = (await res.json()) as {
-      timezone?: string;
       current?: { time?: string; temperature_2m?: number; weather_code?: number; is_day?: number };
     };
     const cur = data.current;
-    if (!cur || typeof data.timezone !== "string") return null;
+    if (!cur || typeof cur.time !== "string") return null;
     return {
-      tz: data.timezone,
+      time: cur.time.slice(11, 16),
       tempC: Math.round(cur.temperature_2m ?? 0),
       phrase: WMO[cur.weather_code ?? -1] ?? "weather unknown",
       isDay: cur.is_day === 1,

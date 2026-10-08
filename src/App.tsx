@@ -8,14 +8,15 @@ import {
   antipodeOf,
   formatKm,
   formatCoord,
+  haversineKm,
   latLonToVec3,
   norm,
 } from "./lib/geo-math";
 import { resolveSignals, stationDistanceKm, Station, TuneResult } from "./lib/radio";
 import { searchPlaces, describePlace, Place } from "./lib/geocode";
 import { Player, PlayerState } from "./lib/player";
-import { fetchThere, thereTime, There } from "./lib/there";
-import { Guide } from "./components/Guide";
+import { fetchThere, There } from "./lib/there";
+import { Guide, guideSeen } from "./components/Guide";
 import { probeCors } from "./lib/probe";
 import { toggleSound, staticBurst, detentClick, lockBlip } from "./lib/sound";
 
@@ -45,20 +46,10 @@ export default function App() {
   const [boreDone, setBoreDone] = useState(false);
   const [there, setThere] = useState<There | null>(null);
   const [metered, setMetered] = useState(false);
-  const [carrier, setCarrier] = useState(false); // scope draws the designed carrier
-  const [previewIx, setPreviewIx] = useState(-1); // dial candidate under the needle
-  // The bore counter lives in the working column — Globe writes into
-  // these spans directly each frame, no React render per tick.
-  const boreOut = useRef<{ km: HTMLSpanElement | null; layer: HTMLSpanElement | null }>({
-    km: null,
-    layer: null,
-  });
   const [prevName, setPrevName] = useState<string | null>(null); // crossfade tail
   const [snd, setSnd] = useState(false);
   const [dragHint, setDragHint] = useState(true);
-  // The tour is opt-in ("guide" key in the topbar): first-run guidance is
-  // a quiet "drag the planet" hint plus the dial note after first audio.
-  const [guideOn, setGuideOn] = useState(false);
+  const [guideOn, setGuideOn] = useState(() => !guideSeen());
   const [guideRun, setGuideRun] = useState(0);
   // Once the dial lesson has been shown this session its slot keeps the
   // height — the tuner must never move under a resting thumb.
@@ -66,12 +57,6 @@ export default function App() {
   if (guideOn) guideWasOnRef.current = true;
   const [globeTouched, setGlobeTouched] = useState(false);
   const [dialTouched, setDialTouched] = useState(false);
-  const [, setClock] = useState(0); // minute tick — keeps the antipode time moving
-  useEffect(() => {
-    if (!there) return;
-    const t = window.setInterval(() => setClock((c) => c + 1), 30_000);
-    return () => window.clearInterval(t);
-  }, [there]);
 
   const player = useRef<Player | null>(null);
   const candidatesRef = useRef<Station[]>([]);
@@ -412,16 +397,6 @@ export default function App() {
       ? (candidatesRef.current[stationIx] ?? null)
       : null;
 
-  // The point the dial is auditioning — the candidate under the needle
-  // while dragging, else the tuned station. The porthole draws it as a
-  // separate marker from the exact antipode.
-  const stationVec = useMemo(() => {
-    const c = candidatesRef.current[previewIx >= 0 ? previewIx : stationIx];
-    return c && c.geoLat !== null && c.geoLong !== null
-      ? latLonToVec3(c.geoLat, c.geoLong)
-      : null;
-  }, [previewIx, stationIx, station]);
-
   const reset = () => {
     runId.current++;
     selToken.current++;
@@ -438,8 +413,6 @@ export default function App() {
     setBoreDone(false);
     setThere(null);
     setMetered(false);
-    setCarrier(false);
-    setPreviewIx(-1);
     const u = new URL(window.location.href);
     u.search = "";
     window.history.replaceState(null, "", u.toString());
@@ -490,70 +463,53 @@ export default function App() {
       <p className="visually-hidden" aria-live="polite">
         {liveMsg}
       </p>
-
       <main className="hero">
-        <section className="panel">
-          {/* One instrument: masthead, a porthole planet set into its
-              face, and the tuning strips below. The well never resizes —
-              the arrival rearranges nothing. */}
-          <div className={`receiver${phase === "idle" ? " standby" : " card"}`}>
-            <div className="rx-masthead">
-              <span className="wordmark">
-                antípoda<i className="wordmark-dot">·</i>fm
-              </span>
-              <span className="mast-tag">the broadcast from underneath you</span>
-              <div className="mast-keys">
-                <button
-                  className={`snd${snd ? " on" : ""}`}
-                  onClick={() => {
-                    setSnd(toggleSound());
-                    if (!snd) detentClick();
-                  }}
-                  aria-pressed={snd}
-                  aria-label="Interface sounds"
-                  title={snd ? "Mute interface sounds" : "Enable interface sounds"}
-                >
-                  {snd ? "fx on" : "fx off"}
-                </button>
-                <button
-                  className="snd"
-                  onClick={() => {
-                    // A replay teaches the gestures again — the lessons it
-                    // carries must see untouched controls or it skips itself.
-                    setGlobeTouched(false);
-                    setDialTouched(false);
-                    setGuideRun((r) => r + 1);
-                    setGuideOn(true);
-                  }}
-                  aria-label="Replay the intro"
-                  title="Replay the intro"
-                >
-                  guide
-                </button>
-              </div>
-            </div>
-
-            <div className="rx-body">
-              <div className="rx-well">
-                <section
-                  className={`stage${boring ? " boring" : ""}${phase === "tuned" ? " on" : ""}`}
-                  aria-label="Earth"
-                >
-                  <div className="well-disc">
-                    <Globe
-                      className="globe"
-                      axis={axisVec}
-                      origin={originVec}
-                      antipode={antiVec}
-                      stationAt={stationVec}
-                      locked={phase === "tuned" && playing}
-                      boring={boring}
-                      armed={armed}
-                      boreOut={boreOut}
-                      onBoreComplete={onBoreComplete}
-                      onInteract={() => setGlobeTouched(true)}
-                    />
-                  </div>
+        <section
+          className={`stage${boring ? " boring" : ""}${phase === "tuned" ? " on" : ""}`}
+          aria-label="Earth"
+        >
+          <Globe
+            className="globe"
+            axis={axisVec}
+            origin={originVec}
+            antipode={antiVec}
+            locked={phase === "tuned" && playing}
+            boring={boring}
+            armed={armed}
+            onBoreComplete={onBoreComplete}
+            onInteract={() => setGlobeTouched(true)}
+          />
+          <span className="stage-tag">antípoda.fm</span>
+          <span className="stage-sub">the broadcast from underneath you</span>
+          <div className="stage-ctl">
+            <button
+              className={`snd ${snd ? "on" : ""}`}
+              onClick={() => {
+                setSnd(toggleSound());
+                if (!snd) detentClick();
+              }}
+              aria-pressed={snd}
+              aria-label="Interface sounds"
+              title={snd ? "Mute interface sounds" : "Enable interface sounds"}
+            >
+              {snd ? "FX·ON" : "FX·OFF"}
+            </button>
+            <button
+              className="snd"
+              onClick={() => {
+                // A replay teaches the gestures again — the lessons it
+                // carries must see untouched controls or it skips itself.
+                setGlobeTouched(false);
+                setDialTouched(false);
+                setGuideRun((r) => r + 1);
+                setGuideOn(true);
+              }}
+              aria-label="Replay the intro"
+              title="Replay the intro"
+            >
+              ?
+            </button>
+          </div>
           {phase !== "idle" && (
             <div className="dial-caption" aria-hidden="true">
               {/* Mount from the start of tuning — the rows exist before
@@ -578,437 +534,316 @@ export default function App() {
                   aria-hidden="true"
                   tabIndex={-1}
                 >
-                  spin the planet — the view only
+                  drag the planet
                 </button>
               )}
             </div>
           )}
-          {/* The marker key is reserved from the start of the hunt —
-              mounting it only on arrival was the chassis growth. */}
-          {phase !== "idle" && (
-            <p
-              className={`well-legend${phase === "tuned" ? "" : " off"}`}
-              aria-hidden="true"
-            >
-              <span className="lg-anti">◌</span> exact point ·{" "}
-              <span className="lg-stn">●</span> station
-            </p>
-          )}
-                </section>
-              </div>
+        </section>
 
-              <div className="rx-main">
-                {/* The opening lesson lives here in flow — covering
-                    neither planet nor headline. Its space is reserved
-                    while the guide owns it. */}
-                <div
-                  className={`guide-intro-slot${guideOn && phase === "idle" ? " reserved" : ""}`}
-                />
+        {/* On small screens the opening lesson lives here in flow —
+            between the planet and the headline, covering neither. The
+            space is reserved while the guide owns it so the headline
+            never shifts when the row appears. */}
+        <div
+          className={`guide-intro-slot${guideOn && phase === "idle" ? " reserved" : ""}`}
+        />
 
-                {phase === "idle" && (
-              <>
-                <div className="rx-plate rx-standby">
-                  <h1 className="standby-name">
-                    somewhere on the far side of the planet, a radio is
-                    playing.
-                  </h1>
-                  <p className="rx-meta">
-                    straight down through the earth — the live station nearest
-                    your antipode.
-                  </p>
-                </div>
-                <div className="rx-actions">
-                  <div className="search">
-                    <label className="search-label" htmlFor="place">
-                      choose your starting place
-                    </label>
-                    <div className="search-row">
-                      <input
-                        ref={placeInputRef}
-                        id="place"
-                        type="text"
-                        autoComplete="off"
-                        placeholder="Madrid, Tokyo, a peak…"
-                        value={query}
-                        onChange={(e) => setQuery(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (
-                            e.key === "Enter" &&
-                            places[0] &&
-                            placesFor.current === query.trim()
-                          )
-                            pickPlace(places[0]);
-                        }}
-                      />
-                      <button
-                        className="key search-go"
-                        disabled={
-                          !places[0] || placesFor.current !== query.trim()
-                        }
-                        onClick={() => places[0] && pickPlace(places[0])}
-                        aria-label="Tune from the first matching place"
-                      >
-                        tune
-                      </button>
-                    </div>
-                    {places.length > 0 && (
-                      <ul className="place-list">
-                        {places.map((p, i) => (
-                          <li key={i}>
-                            <button onClick={() => pickPlace(p)}>
-                              {describePlace(p)}
-                            </button>
-                          </li>
-                        ))}
-                      </ul>
-                    )}
-                  </div>
-                  <button className="key key-go" onClick={locateAndTune}>
-                    <span className="key-lamp" aria-hidden="true" />
-                    tune from my location
-                  </button>
-                </div>
-              </>
-            )}
-
-            {phase === "tuning" && (
-              <>
-              <div className="rx-head">
-                <span className="rx-lamp" aria-hidden="true" />
-                <span className="rx-state">Tuning</span>
-                <span className="rx-count" aria-hidden="true">
-                  {station
-                    ? `trying ${station.name}`
-                    : `${candidatesRef.current.length || "…"} signals near the far side`}
-                </span>
-                <div className="rx-keys">
-                  <button className="key" onClick={reset}>
-                    stop
-                  </button>
-                </div>
-              </div>
-              {/* The crossing's scale claim lives in the working column —
-                  the Globe writes into these spans each frame, so the
-                  numbers never fight the porthole for space. */}
-              <div className="bore-readout" aria-hidden="true">
-                <span
-                  className="bore-km"
-                  ref={(el) => {
-                    boreOut.current.km = el;
-                  }}
-                />
-                <span
-                  className="bore-layer"
-                  ref={(el) => {
-                    boreOut.current.layer = el;
-                  }}
-                />
-              </div>
-              <div className="rx-plate">
-                <h2 className="station-name dim">
-                  {station ? station.name : "searching the band"}
-                </h2>
-              </div>
-              {/* One current message — the hunt is a status, not a log. */}
-              <p className="rx-status" role="status">
-                {log.length ? log[log.length - 1] : "warming the needle"}
+        <section className="panel">
+          {phase === "idle" && (
+            <div className="intro">
+              <h1>
+                Somewhere on the far side of the planet, a radio is playing.
+              </h1>
+              <p className="lede">
+                Straight down through the Earth, to the station broadcasting
+                nearest your antipode.
               </p>
-              </>
-            )}
-
-            {phase === "tuned" && station && tune && (
-              <>
-              <div className="rx-head">
-                <span className={`rx-lamp${playing ? " on" : ""}`} aria-hidden="true" />
-                <span className="rx-state onair">
-                  {playing ? "ON AIR" : connecting ? "CONNECTING" : "PAUSED"}
-                </span>
-                <span className="rx-count">
-                  {stationIx + 1} of {candidatesRef.current.length}
-                </span>
-                <div className="rx-keys">
-                  <button
-                    ref={playBtnRef}
-                    className={`key key-play${playing ? " on" : ""}`}
-                    disabled={connecting}
-                    onClick={() =>
-                      playing ? player.current?.pause() : player.current?.resume()
-                    }
-                    aria-label={
-                      playing
-                        ? "Pause the broadcast"
-                        : connecting
-                          ? "Connecting"
-                          : "Listen"
-                    }
-                  >
-                    {playing ? "pause" : "listen"}
-                  </button>
-                  <button
-                    className={`key${copyFailed ? " bad" : copied ? " ok" : ""}`}
-                    onClick={copyLink}
-                    aria-label={
-                      copyFailed
-                        ? "Couldn't copy — copy the address bar"
-                        : copied
-                          ? "Link copied"
-                          : "Copy a link to this signal"
-                    }
-                  >
-                    {copied ? "link copied" : "copy link"}
-                  </button>
-                  <button className="key" onClick={reset}>
-                    new origin
-                  </button>
+              <div className="actions">
+                <button className="btn primary" onClick={locateAndTune}>
+                  Tune the other side
+                </button>
+                <div className="search">
+                  <label className="visually-hidden" htmlFor="place">
+                    or name a place
+                  </label>
+                  <input
+                    ref={placeInputRef}
+                    id="place"
+                    type="text"
+                    autoComplete="off"
+                    placeholder="or name a place…"
+                    value={query}
+                    onChange={(e) => setQuery(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (
+                        e.key === "Enter" &&
+                        places[0] &&
+                        placesFor.current === query.trim()
+                      )
+                        pickPlace(places[0]);
+                    }}
+                  />
+                  {places.length > 0 && (
+                    <ul className="place-list">
+                      {places.map((p, i) => (
+                        <li key={i}>
+                          <button onClick={() => pickPlace(p)}>
+                            {describePlace(p)}
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
                 </div>
               </div>
-
-              {/* The name is the receiver's identification plate. */}
-              <div className="rx-plate">
-                <h2 className="station-name">
-                  {prevName && prevName !== station.name && (
-                    <span
-                      className="stn-old"
-                      onAnimationEnd={() => setPrevName(null)}
-                    >
-                      {prevName}
-                    </span>
-                  )}
-                  <span className="stn-new" key={station.name}>
-                    {station.name}
-                  </span>
-                </h2>
-                <p className="rx-meta">
-                  {station.country || "somewhere far away"}
-                  {offPointKm !== null &&
-                    ` · ${formatKm(offPointKm)} from the point`}
-                  {stationKm !== null &&
-                    ` · ≈${formatKm(stationKm)} around Earth’s surface`}
-                </p>
-                {(station.codec || station.language) && (
-                  <p className="rx-tech">
-                    {[station.codec && station.bitrate > 0
-                      ? `${station.codec} ${station.bitrate}k`
-                      : station.codec, station.language]
-                      .filter(Boolean)
-                      .join(" · ")}
-                  </p>
-                )}
-              </div>
-              {connecting && (
-                <p className="rx-status" role="status">
-                  {log.length ? log[log.length - 1] : `connecting to ${station.name}`}
+              {geoDenied && (
+                <p className="note">
+                  Position unavailable. Name a place instead.
                 </p>
               )}
-              </>
-            )}
+              {searchNote && <p className="note">{searchNote}</p>}
+              {searching && <p className="note dim">looking…</p>}
+              <p className="quick">
+                {QUICK_PLACES.map((q, i) => (
+                  <span key={q}>
+                    {i > 0 && <span className="quick-sep">·</span>}
+                    <button className="place-link" onClick={() => quickPlace(q)}>
+                      {q}
+                    </button>
+                  </span>
+                ))}
+              </p>
+            </div>
+          )}
 
-            {phase === "failed" && (
-              <div className="failed">
-                <h2>The other side is quiet.</h2>
-                <p className="lede">{failMsg}</p>
-                <div className="actions">
-                  <button ref={failBtnRef} className="key key-go" onClick={reset}>
-                    <span className="key-lamp" aria-hidden="true" />
-                    try another place
-                  </button>
-                </div>
+          {phase === "tuning" && (
+            <div className="tuning">
+              <ul className="log">
+                {log.map((l, i) => (
+                  <li key={i} className={i === log.length - 1 ? "cur" : ""}>
+                    {l}
+                  </li>
+                ))}
+              </ul>
+              {station && (
+                <p className="note">
+                  trying {station.name} · {station.country}
+                </p>
+              )}
+              <Dial
+                count={candidatesRef.current.length}
+                index={stationIx}
+                sweeping={!boreDone}
+                live={false}
+                onSelect={selectSignal}
+                onMove={() => snd && staticBurst(90, 0.028)}
+                label="searching the band"
+              />
+              <button className="btn ghost" onClick={reset}>
+                step back
+              </button>
+            </div>
+          )}
+
+          {phase === "tuned" && station && tune && (
+            <div className="card">
+              <div className="onair">
+                <span className={`dot ${playing ? "on" : ""}`} />
+                {playing ? "ON AIR" : connecting ? "CONNECTING" : "PAUSED"}
               </div>
-            )}
-              </div>{/* /rx-main */}
-            </div>{/* /rx-body */}
-
-            {(phase === "tuning" || phase === "tuned") && (
-              <>
-                {/* The scope is the receiver's glass — edge to edge, its
-                    slot reserved through the hunt so a landing signal
-                    never rebuilds the instrument around it. */}
-                <Scope
-                  className="scope"
-                  player={player.current}
-                  active={phase === "tuned" && playing}
-                  connecting={phase === "tuning" || connecting}
-                  metered={phase === "tuned" && metered}
-                  onCarrier={setCarrier}
-                />
-                {/* Always mounted — an empty note holds its strip so the
-                    chassis never moves when the carrier honesty line
-                    appears. */}
-                <p
-                  className={`scope-note${phase === "tuned" && playing && carrier ? "" : " off"}`}
-                  aria-hidden={
-                    !(phase === "tuned" && playing && carrier) || undefined
+              <p className="station-meta">
+                {[station.country, station.language]
+                  .filter(Boolean)
+                  .join(" · ") || "somewhere far away"}
+                {station.codec && station.bitrate > 0
+                  ? ` · ${station.codec} ${station.bitrate}k`
+                  : ""}
+              </p>
+              {stationKm !== null ? (
+                <p className="distance">
+                  ≈{formatKm(stationKm)} over the surface
+                  {nearPoint && " — nearly the span of Earth"}
+                </p>
+              ) : (
+                <p className="distance">
+                  antipode {formatKm(haversineKm(tune.origin, tune.antipode))}{" "}
+                  away over the surface · station position unmapped
+                </p>
+              )}
+              <p className="bore-line">signal path 12,742 km — through the mantle and core</p>
+              <Scope
+                className="scope"
+                player={player.current}
+                active={playing}
+                connecting={connecting}
+                metered={metered}
+              />
+              {playing && !metered && (
+                <p className="scope-note">
+                  carrier live — this stream can’t feed the meter
+                </p>
+              )}
+              <div
+                className={`dial-lesson-slot${guideWasOnRef.current ? " held" : ""}`}
+              />
+              <div
+                className="dial-wrap"
+                onPointerDownCapture={(e) => {
+                  dialGrabX.current = e.clientX;
+                }}
+                onPointerMoveCapture={(e) => {
+                  // the lesson completes on real travel, not a resting thumb
+                  if (dialGrabX.current !== null && Math.abs(e.clientX - dialGrabX.current) > 12) {
+                    dialGrabX.current = null;
+                    setDialTouched(true);
                   }
-                >
-                  carrier live — drawn, not measured
-                </p>
-                <div
-                  className={`dial-lesson-slot${guideWasOnRef.current ? " held" : ""}`}
-                />
-                <div
-                  className="dial-wrap"
-                  onPointerDownCapture={(e) => {
-                    dialGrabX.current = e.clientX;
-                  }}
-                  onPointerMoveCapture={(e) => {
-                    // the lesson completes on real travel, not a resting thumb
-                    if (
-                      dialGrabX.current !== null &&
-                      Math.abs(e.clientX - dialGrabX.current) > 12
-                    ) {
-                      dialGrabX.current = null;
-                      setDialTouched(true);
-                    }
-                  }}
-                  onPointerUpCapture={() => {
-                    dialGrabX.current = null;
-                  }}
-                  onPointerCancelCapture={() => {
-                    dialGrabX.current = null;
-                  }}
-                >
-                  <button
-                    className="dial-step"
-                    onClick={() => selectSignal(stationIx - 1)}
-                    disabled={stationIx <= 0}
-                    aria-label="Previous signal"
-                  >
-                    ‹
-                  </button>
-                  <Dial
-                    count={candidatesRef.current.length}
-                    index={stationIx}
-                    sweeping={phase === "tuning" && !boreDone}
-                    live={phase === "tuned" && playing}
-                    names={candidatesRef.current.map((c) => c.name)}
-                    onSelect={selectSignal}
-                    onPreview={setPreviewIx}
-                    onMove={() => snd && staticBurst(90, 0.028)}
-                    onLock={() => {
-                      if (snd) detentClick();
-                    }}
-                    label={station ? station.name : "searching the band"}
-                  />
-                  <button
-                    className="dial-step"
-                    onClick={() => selectSignal(stationIx + 1)}
-                    disabled={stationIx >= candidatesRef.current.length - 1}
-                    aria-label="Next signal"
-                  >
-                    ›
-                  </button>
+                }}
+                onPointerUpCapture={() => {
+                  dialGrabX.current = null;
+                }}
+                onPointerCancelCapture={() => {
+                  dialGrabX.current = null;
+                }}
+              >
+                {/* The name is the tuner's identification plate — it
+                    belongs on the instrument, not the document. */}
+                <div className="dial-plate">
+                  <h2 className="station-name">
+                    {prevName && prevName !== station.name && (
+                      <span
+                        className="stn-old"
+                        onAnimationEnd={() => setPrevName(null)}
+                      >
+                        {prevName}
+                      </span>
+                    )}
+                    <span className="stn-new" key={station.name}>
+                      {station.name}
+                    </span>
+                  </h2>
                 </div>
-                {/* Reserved strip — one status slot beside the dial:
-                    the lesson, then the consequence of what you hold. */}
-                <p
-                  className={`rx-hint${phase === "tuned" && playing && !guideOn ? "" : " off"}`}
-                  role="status"
-                >
-                  {previewIx >= 0 && candidatesRef.current[previewIx]
-                    ? `release for ${previewIx + 1} · ${candidatesRef.current[previewIx].name}`
-                    : !dialTouched
-                      ? "each notch is another station — drag the strip"
-                      : station
-                        ? `playing ${stationIx + 1} · ${station.name}`
-                        : "each notch is another station — drag the strip"}
+                <Dial
+                  count={candidatesRef.current.length}
+                  index={stationIx}
+                  sweeping={false}
+                  live={playing}
+                  onSelect={selectSignal}
+                  onMove={() => snd && staticBurst(90, 0.028)}
+                  onLock={() => {
+                    if (snd) detentClick();
+                  }}
+                  label={station.name}
+                />
+              </div>
+              {tune.land.oceanKm !== null ? (
+                <p className="note">
+                  your antipode is open ocean · nearest landfall{" "}
+                  {tune.land.country.name}, {formatKm(tune.land.oceanKm)} from
+                  the point
                 </p>
-              </>
-            )}
-
-            {/* The foot is the instrument's legend strip — present in
-                every phase so nothing moves when it fills. */}
-            {phase !== "failed" && (
-              <div className="rx-foot">
-                {phase === "idle" && (
-                  <>
-                    <p className="quick">
-                      <span className="quick-lead">try</span>
-                      {QUICK_PLACES.map((q) => (
-                        <button
-                          key={q}
-                          className="place-link"
-                          onClick={() => quickPlace(q)}
-                        >
-                          {q}
-                        </button>
-                      ))}
-                    </p>
-                    {geoDenied && (
-                      <p className="note">
-                        Position unavailable. Name a place instead.
-                      </p>
-                    )}
-                    {searchNote && <p className="note">{searchNote}</p>}
-                    {searching && <p className="note dim">looking…</p>}
-                    {/* Attribution rides inside the instrument's legend
-                        strip, not a marginal page credit. */}
-                    <details className="sources">
-                      <summary>sources</summary>
-                      <p>
-                        stations · radio-browser.info · earth · natural earth ·
-                        weather · open-meteo
-                      </p>
-                    </details>
-                  </>
-                )}
-                {phase === "tuning" && (
-                  <p className="note">
-                    {tune ? (
-                      <>
-                        <b className="foot-you">you</b> ·{" "}
-                        {tune.origin.label ?? formatCoord(tune.origin)}
-                        <span className="foot-arrow" aria-hidden="true">
-                          {" "}
-                          ⟶{" "}
-                        </span>
-                        <span className="visually-hidden"> to </span>
-                        {formatCoord(tune.antipode)}
-                      </>
-                    ) : (
-                      "finding you on the map"
-                    )}
-                  </p>
-                )}
-                {phase === "tuned" && tune && (
-                  <>
-                    <div className="foot-geo">
-                      <p className="note">
-                        <b className="foot-you">you</b> ·{" "}
-                        {tune.origin.label ?? formatCoord(tune.origin)}
-                      </p>
-                      <p className="note">
-                        antipode {formatCoord(tune.antipode)} ·{" "}
-                        {tune.land.oceanKm !== null
-                          ? `open ocean — nearest landfall ${tune.land.country.name}, ${formatKm(tune.land.oceanKm)} away`
-                          : tune.land.country.name}
-                      </p>
-                    </div>
-                    {there && (
-                      <p className="note foot-wx">
-                        {there.isDay ? "☀" : "☾"} there it’s{" "}
-                        <b>{thereTime(there.tz)}</b>, {there.tempC}°,{" "}
-                        {there.phrase}
-                      </p>
-                    )}
-                    {!nearPoint && offPointKm !== null && (
-                      <p className="note">
-                        this signal drifts {formatKm(offPointKm)} from the
-                        exact point — a straggler on the dial
-                      </p>
-                    )}
-                    {copyFailed && (
-                      <p className="note copy-note" role="status">
-                        couldn’t copy — the address bar has the link
-                      </p>
-                    )}
-                    {lastSignalNote && (
-                      <p className="note">last signal on the dial</p>
-                    )}
-                  </>
+              ) : (
+                <p className="note anti-coord">
+                  antipode {formatCoord(tune.antipode)} · {tune.land.country.name}
+                </p>
+              )}
+              {there && (
+                <p className="there">
+                  {there.isDay ? "☀" : "☾"}{" "}
+                  {tune.land.oceanKm !== null
+                    ? `${tune.land.country.name} reads `
+                    : "there it's "}
+                  <b>{there.time}</b>, {there.tempC}°, {there.phrase}
+                </p>
+              )}
+              {!nearPoint && offPointKm !== null && (
+                <p className="note">
+                  this signal drifts {formatKm(offPointKm)} from the exact
+                  point — a straggler on the dial
+                </p>
+              )}
+              <div className="controls">
+                <button
+                  ref={playBtnRef}
+                  className={`play-btn${playing ? " on" : ""}`}
+                  disabled={connecting}
+                  onClick={() => (playing ? player.current?.pause() : player.current?.resume())}
+                  aria-label={
+                    playing ? "Pause the broadcast" : connecting ? "Connecting" : "Listen"
+                  }
+                  title={playing ? "Pause" : "Listen"}
+                >
+                  {playing ? (
+                    <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+                      <rect x="6" y="5" width="4" height="14" fill="currentColor" />
+                      <rect x="14" y="5" width="4" height="14" fill="currentColor" />
+                    </svg>
+                  ) : (
+                    <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+                      <path d="M8 5v14l11-7z" fill="currentColor" />
+                    </svg>
+                  )}
+                </button>
+                <button
+                  className={`icon-btn${copyFailed ? " bad" : ""}`}
+                  onClick={copyLink}
+                  aria-label={
+                    copyFailed ? "Couldn't copy — copy the address bar" : copied ? "Link copied" : "Copy a link to this signal"
+                  }
+                  title={copyFailed ? "Couldn't copy — the address bar has the link" : copied ? "Copied" : "Copy link"}
+                >
+                  {copied ? (
+                    <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+                      <path
+                        d="M9 16.2L4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4z"
+                        fill="currentColor"
+                      />
+                    </svg>
+                  ) : (
+                    <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+                      <path
+                        d="M10.6 13.4a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="1.6"
+                        strokeLinecap="round"
+                      />
+                      <path
+                        d="M13.4 10.6a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="1.6"
+                        strokeLinecap="round"
+                      />
+                    </svg>
+                  )}
+                </button>
+                <button className="link-btn" onClick={reset}>
+                  elsewhere
+                </button>
+                {copyFailed && (
+                  <span className="copy-note" role="status">
+                    couldn’t copy — the address bar has the link
+                  </span>
                 )}
               </div>
-            )}
-          </div>
+              {lastSignalNote && (
+                <p className="note dim">last signal on the dial</p>
+              )}
+            </div>
+          )}
+
+          {phase === "failed" && (
+            <div className="failed">
+              <h2>The other side is quiet.</h2>
+              <p className="lede">{failMsg}</p>
+              <div className="actions">
+                <button ref={failBtnRef} className="btn primary" onClick={reset}>
+                  Try another place
+                </button>
+              </div>
+            </div>
+          )}
         </section>
       </main>
 
@@ -1025,6 +860,16 @@ export default function App() {
         />
       )}
 
+      <footer className="foot">
+        <details className="sources">
+          <summary>sources</summary>
+          <p>
+            stations · radio-browser.info · earth · natural earth · weather ·
+            open-meteo
+          </p>
+        </details>
+        <span className="foot-hint">arrows or drag tune the dial</span>
+      </footer>
     </div>
   );
 }
