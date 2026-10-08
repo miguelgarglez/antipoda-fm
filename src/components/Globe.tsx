@@ -4,12 +4,22 @@ import {
   dot,
   cross,
   norm,
-  add,
   scale,
-  slerp,
-  rotateAroundAxis,
+  add,
+  sub,
   latLonToVec3,
 } from "../lib/geo-math";
+import {
+  Quat,
+  qAxis,
+  qForward,
+  qFromRows,
+  qLookAt,
+  qMul,
+  qNorm,
+  qRot,
+  qSlerp,
+} from "../lib/quat";
 import { coastRings } from "../lib/earth";
 import { drawSection, layerAt, DIAMETER_KM, BOUNDS } from "../lib/section";
 
@@ -30,30 +40,36 @@ type Props = {
 const BONE = "#F2EEE3";
 const ORANGE = "#FF4D00";
 const PHOSPHOR = "#7CFFB2";
+const NORTH: Vec3 = [0, 0, 1];
 
-const DRIFT = 0.045; // rad/s camera orbit around the vertical axis
+const DRIFT = 0.05; // rad/s idle turntable spin (view space +y)
+const ZOOM_MIN = 0.55;
+const ZOOM_MAX = 2.8;
 
 // Boundary crossings as chord fractions -> boundary circle radius / R.
 const CROSSINGS = [BOUNDS.mantleCore, BOUNDS.outerInner, 1 - BOUNDS.outerInner, 1 - BOUNDS.mantleCore].map(
   (f) => ({ frac: f, r: Math.abs(1 - 2 * f) }),
 );
 
-// The bore runs on a fixed clock, not the network's: the planet opens,
-// the probe descends on a decelerating approach, rests at the far rim
-// while the resolver answers, then the shell reseals. If the resolver is
-// fast the whole gesture lands in ~1.7s; a slow network only stretches
-// the honest hold at the exit point.
+// The bore runs on a fixed clock, not the network's: the camera first
+// flies to where you stand, swings around to slice the chord, then the
+// planet opens and the probe descends on a decelerating approach, rests
+// at the far rim while the resolver answers, and the shell reseals.
 const BORE_T = {
-  openAt: 180, // ms after boring starts — let the axis swing begin first
+  openAt: 180, // ms after boreStart — boreStart itself trails the shots
   openDur: 320,
   travelAt: 460,
   travelDur: 920,
   hold: 90,
   resealDur: 240,
 };
+// Camera prelude: fly-to-origin, then swing to the chord view.
+const SHOT_MS = { toOrigin: 640, toChord: 540, settle: 160 };
+const PRE_BORE = SHOT_MS.toOrigin + SHOT_MS.toChord + SHOT_MS.settle;
 
 const easeInOut = (t: number) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
 const clamp01 = (t: number) => Math.min(1, Math.max(0, t));
+const clamp = (x: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, x));
 
 // Precomputed graticule: parallels every 30deg, meridians every 30deg.
 const GRATICULE: Vec3[][] = (() => {
@@ -82,19 +98,44 @@ const STARS: { x: number; y: number; r: number; a: number }[] = Array.from(
   }),
 );
 
+// Rest view: tilted pole up, lens on the Atlantic side.
+const HOME_Q: Quat = (() => {
+  const eU = norm([Math.sin(0.41), 0, Math.cos(0.41)]);
+  const f = latLonToVec3(16, -30);
+  let eV = sub(f, scale(eU, dot(f, eU)));
+  eV = norm(eV);
+  const eR = cross(eU, eV);
+  return qFromRows(eR, eU, eV);
+})();
+
+/** Orientation with world dir `axis` pinned to screen-up, facing `hint`. */
+function qAxisUp(axis: Vec3, facingHint: Vec3): Quat {
+  const eU = norm(axis);
+  let eV = sub(facingHint, scale(eU, dot(facingHint, eU)));
+  if (Math.hypot(eV[0], eV[1], eV[2]) < 1e-6) {
+    const ref: Vec3 = Math.abs(eU[2]) < 0.9 ? [0, 0, 1] : [1, 0, 0];
+    eV = norm(cross(eU, ref));
+  } else {
+    eV = norm(eV);
+  }
+  const eR = cross(eU, eV);
+  return qFromRows(eR, eU, eV);
+}
+
+type Shot = { at: number; dur: number; q1: Quat; z1: number };
+
 export function Globe({ axis, origin, antipode, locked, boring, armed, onBoreComplete, className }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const state = useRef({
-    shownAxis: axis,
-    fromAxis: axis,
-    toAxis: axis,
-    transitionStart: 0,
-    // Camera forward vector, rotated incrementally so it never snaps.
-    u: null as Vec3 | null,
-    userVel: 0,
-    dragging: false,
-    lastX: 0,
-    lastMoveT: 0,
+    q: HOME_Q as Quat,
+    zoom: 1,
+    zoomT: 1,
+    wvel: [0, 0, 0] as Vec3, // view-space angular velocity, rad/s
+    pointers: new Map<number, { x: number; y: number }>(),
+    pinch0: 0,
+    pinchZoom0: 1,
+    shots: [] as Shot[],
+    shotFrom: null as { q: Quat; z: number; t0: number } | null,
     morphT: 0,
     probeT: -1,
     boreDone: false,
@@ -104,12 +145,14 @@ export function Globe({ axis, origin, antipode, locked, boring, armed, onBoreCom
     resealStart: 0,
     flashes: [] as { t: number; at: number }[],
     crossed: new Set<number>(),
+    hadMarkers: false,
     lastT: 0,
     dirty: true,
     requestDraw: () => {},
     boring,
     armed,
     locked,
+    axis,
     origin,
     antipode,
     onBoreComplete,
@@ -118,37 +161,61 @@ export function Globe({ axis, origin, antipode, locked, boring, armed, onBoreCom
   s.boring = boring;
   s.armed = armed;
   s.locked = locked;
+  s.axis = axis;
   s.origin = origin;
   s.antipode = antipode;
   s.onBoreComplete = onBoreComplete;
 
-  useEffect(() => {
-    const s = state.current;
-    if (dot(s.toAxis, axis) < 0.999999) {
-      s.fromAxis = s.shownAxis;
-      s.toAxis = axis;
-      s.transitionStart = performance.now();
-      s.dirty = true;
-      s.requestDraw();
-    }
-  }, [axis]);
+  const queueShots = (shots: Shot[]) => {
+    s.shots = shots;
+    s.shotFrom = null;
+    s.wvel = [0, 0, 0];
+    s.dirty = true;
+    s.requestDraw();
+  };
 
+  // The tune choreography. Camera: fly to where you stand, swing to put
+  // the chord vertical, open the planet; after the probe exits, swing to
+  // the far side and zoom in on the station's home, then pull back out.
   useEffect(() => {
     const s = state.current;
+    const now = performance.now();
+    const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     if (boring) {
       s.boreDone = false;
       s.crossed.clear();
       s.resealing = false;
       s.holdStart = 0;
-      s.boreStart = performance.now();
+      s.boreStart = now + (reduced ? 0 : PRE_BORE);
       if (s.probeT < 0) s.probeT = 0;
+      if (!reduced) {
+        queueShots([
+          { at: now, dur: SHOT_MS.toOrigin, q1: qLookAt(s.axis, NORTH), z1: 1.45 },
+          {
+            at: now + SHOT_MS.toOrigin + SHOT_MS.settle,
+            dur: SHOT_MS.toChord,
+            q1: qAxisUp(s.axis, qForward(s.q)),
+            z1: 1,
+          },
+        ]);
+      }
     } else {
       s.probeT = -1;
       s.flashes = [];
       s.resealing = false;
+      // The bore resealed — reveal the far side, then hand the planet
+      // back to the user.
+      if (s.boreDone && s.antipode && !reduced) {
+        const up = Math.abs(dot(s.antipode, NORTH)) > 0.93 ? [0, 1, 0] as Vec3 : NORTH;
+        queueShots([
+          { at: now + 120, dur: 1050, q1: qLookAt(s.antipode, up), z1: 1.5 },
+          { at: now + 120 + 1050 + 620, dur: 720, q1: qLookAt(s.antipode, up), z1: 1 },
+        ]);
+      }
     }
     s.dirty = true;
     s.requestDraw();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [boring]);
 
   // `armed` only needs to wake a sleeping (reduced-motion) loop — the bore
@@ -159,8 +226,23 @@ export function Globe({ axis, origin, antipode, locked, boring, armed, onBoreCom
   }, [armed]);
 
   useEffect(() => {
-    state.current.dirty = true;
-    state.current.requestDraw();
+    const s = state.current;
+    if (origin && antipode) s.hadMarkers = true;
+    // Reset: markers vanished — glide home.
+    if (!origin && s.hadMarkers) {
+      const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      s.hadMarkers = false;
+      s.shots = reduced ? [] : [{ at: performance.now(), dur: 700, q1: HOME_Q, z1: 1 }];
+      if (reduced) {
+        s.q = HOME_Q;
+        s.zoom = 1;
+        s.zoomT = 1;
+      }
+      s.zoomT = s.shots.length ? s.zoomT : 1;
+      s.wvel = [0, 0, 0];
+    }
+    s.dirty = true;
+    s.requestDraw();
   }, [origin, antipode, locked]);
 
   useEffect(() => {
@@ -169,6 +251,7 @@ export function Globe({ axis, origin, antipode, locked, boring, armed, onBoreCom
     const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     let raf = 0;
     let cssSize = 0;
+    let baseR = 0;
     let dead = false;
 
     const requestDraw = () => {
@@ -180,6 +263,7 @@ export function Globe({ axis, origin, antipode, locked, boring, armed, onBoreCom
       const rect = canvas.getBoundingClientRect();
       const dpr = Math.min(2, window.devicePixelRatio || 1);
       cssSize = Math.min(rect.width, rect.height);
+      baseR = cssSize * 0.4;
       canvas.width = Math.round(rect.width * dpr);
       canvas.height = Math.round(rect.height * dpr);
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -191,84 +275,129 @@ export function Globe({ axis, origin, antipode, locked, boring, armed, onBoreCom
     const ro = new ResizeObserver(resize);
     ro.observe(canvas);
 
-    // Drag to spin: horizontal drag rotates the camera around the chord axis.
+    // --- Direct manipulation: grab the planet ---
     const onDown = (e: PointerEvent) => {
       const s = state.current;
-      s.dragging = true;
-      s.lastX = e.clientX;
-      s.lastMoveT = performance.now();
-      s.userVel = 0;
       canvas.setPointerCapture(e.pointerId);
+      s.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (s.pointers.size === 2) {
+        const [a, b] = [...s.pointers.values()];
+        s.pinch0 = Math.hypot(a.x - b.x, a.y - b.y) || 1;
+        s.pinchZoom0 = s.zoomT;
+      }
+      s.shots = []; // a grab interrupts the camera
+      s.shotFrom = null;
+      s.wvel = [0, 0, 0];
       canvas.style.cursor = "grabbing";
-    };
-    const onMove = (e: PointerEvent) => {
-      const s = state.current;
-      if (!s.dragging || !s.u) return;
-      const dx = e.clientX - s.lastX;
-      const now = performance.now();
-      const dt = Math.max(1, now - s.lastMoveT);
-      s.lastX = e.clientX;
-      s.lastMoveT = now;
-      const rot = dx * 0.007;
-      const ax = norm(s.shownAxis);
-      s.u = norm(rotateAroundAxis(s.u, ax, rot));
-      s.userVel = reduced ? 0 : rot / (dt / 1000); // rad/s for release inertia
       s.dirty = true;
       s.requestDraw();
     };
-    const onUp = () => {
+    const onMove = (e: PointerEvent) => {
       const s = state.current;
-      s.dragging = false;
-      canvas.style.cursor = "grab";
+      const p = s.pointers.get(e.pointerId);
+      if (!p) return;
+      const dx = e.clientX - p.x;
+      const dy = e.clientY - p.y;
+      s.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (s.pointers.size === 2) {
+        const [a, b] = [...s.pointers.values()];
+        const d = Math.hypot(a.x - b.x, a.y - b.y) || 1;
+        s.zoomT = clamp(s.pinchZoom0 * (d / s.pinch0), ZOOM_MIN, ZOOM_MAX);
+        s.dirty = true;
+        s.requestDraw();
+        return;
+      }
+      if (s.pointers.size !== 1) return;
+      // Trackball: rotation axis is the drag vector rotated 90° in the
+      // view plane, so the surface follows the pointer.
+      const r = Math.max(40, baseR * s.zoom);
+      const theta = Math.hypot(dx, dy) / r;
+      if (theta < 1e-5) return;
+      const ax = norm([dy, dx, 0]);
+      s.q = qNorm(qMul(qAxis(ax, theta), s.q));
+      // Track release inertia as an EMA of instantaneous angular speed.
+      const dtms = 16; // pointer events arrive ~per frame
+      const inst = theta / (dtms / 1000);
+      s.wvel = add(scale(s.wvel, 0.65), scale(ax, inst * 0.35));
+      s.dirty = true;
+      s.requestDraw();
+    };
+    const onUp = (e: PointerEvent) => {
+      const s = state.current;
+      s.pointers.delete(e.pointerId);
+      if (s.pointers.size < 2) s.pinch0 = 0;
+      if (s.pointers.size === 0) canvas.style.cursor = "grab";
+      s.dirty = true;
+      s.requestDraw();
+    };
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      const s = state.current;
+      const k = e.deltaMode === 1 ? 0.05 : e.deltaMode === 2 ? 0.4 : 0.0016;
+      s.zoomT = clamp(s.zoomT * Math.exp(-e.deltaY * k), ZOOM_MIN, ZOOM_MAX);
+      // A wheel gesture takes the camera back — cancel scripted moves.
+      s.shots = [];
+      s.shotFrom = null;
+      s.dirty = true;
+      s.requestDraw();
     };
     canvas.addEventListener("pointerdown", onDown);
     canvas.addEventListener("pointermove", onMove);
     canvas.addEventListener("pointerup", onUp);
     canvas.addEventListener("pointercancel", onUp);
+    canvas.addEventListener("wheel", onWheel, { passive: false });
+    canvas.style.touchAction = "none";
+    canvas.style.cursor = "grab";
 
     type P = { x: number; y: number; z: number };
     const draw = (now: number) => {
       const s = state.current;
-      const dt = s.lastT ? (now - s.lastT) / 1000 : 0;
+      const dt = s.lastT ? Math.min(0.05, (now - s.lastT) / 1000) : 0;
       s.lastT = now;
 
       const moving = !reduced || s.dirty;
 
-      // Axis transition (1.4s ease-in-out), instant under reduced motion.
-      const T = reduced ? 0 : 1400;
-      const k = T === 0 ? 1 : Math.min(1, (now - s.transitionStart) / T);
-      const e = k < 0.5 ? 4 * k * k * k : 1 - Math.pow(-2 * k + 2, 3) / 2;
-      s.shownAxis = slerp(s.fromAxis, s.toAxis, e);
-      const ax = norm(s.shownAxis);
-
-      if (!s.u) {
-        const ref: Vec3 = Math.abs(ax[2]) < 0.9 ? [0, 0, 1] : [1, 0, 0];
-        s.u = norm(cross(ax, ref));
+      // --- camera state ---
+      if (s.shots.length && !s.pointers.size) {
+        const nx = s.shots[0];
+        if (now >= nx.at) {
+          if (!s.shotFrom) s.shotFrom = { q: s.q, z: s.zoom, t0: now };
+          const k = reduced || nx.dur <= 0 ? 1 : Math.min(1, (now - s.shotFrom.t0) / nx.dur);
+          const e = easeInOut(k);
+          s.q = qSlerp(s.shotFrom.q, nx.q1, e);
+          s.zoom = s.shotFrom.z + (nx.z1 - s.shotFrom.z) * e;
+          if (k >= 1) {
+            s.shots.shift();
+            s.shotFrom = null;
+            s.q = nx.q1;
+            s.zoom = nx.z1;
+            s.zoomT = nx.z1;
+          }
+        }
+      } else {
+        s.zoom += (s.zoomT - s.zoom) * Math.min(1, 11 * dt);
+        if (moving && dt > 0 && !s.pointers.size) {
+          const sp = Math.hypot(s.wvel[0], s.wvel[1], s.wvel[2]);
+          if (sp > 0.015) {
+            s.q = qNorm(qMul(qAxis(norm(s.wvel), sp * dt), s.q));
+            s.wvel = scale(s.wvel, Math.pow(0.06, dt));
+          } else {
+            s.wvel = [0, 0, 0];
+            s.q = qNorm(qMul(qAxis([0, 1, 0], DRIFT * dt), s.q));
+          }
+        }
       }
-      if (moving && dt > 0 && !s.dragging) {
-        // Baseline drift plus decaying release inertia.
-        s.userVel *= Math.pow(0.12, dt);
-        if (Math.abs(s.userVel) < 0.01) s.userVel = 0;
-        s.u = norm(rotateAroundAxis(s.u, ax, (DRIFT + s.userVel) * dt));
-      }
-      let u = s.u;
-      u = norm(add(u, scale(ax, -dot(u, ax))));
-      s.u = u;
 
       const w = canvas.getBoundingClientRect().width;
       const h = canvas.getBoundingClientRect().height;
       const cx = w / 2;
       const cy = h / 2;
-      const R = cssSize * 0.4;
+      const R = baseR * s.zoom;
 
-      const eR = norm(cross(ax, u)); // screen right
-      const eU = ax; // screen up
-
-      const proj = (v: Vec3): P => ({
-        x: cx + dot(v, eR) * R,
-        y: cy - dot(v, eU) * R,
-        z: dot(v, u),
-      });
+      const proj = (v: Vec3): P => {
+        const r = qRot(s.q, v);
+        return { x: cx + r[0] * R, y: cy - r[1] * R, z: r[2] };
+      };
 
       ctx.clearRect(0, 0, w, h);
 
@@ -276,7 +405,7 @@ export function Globe({ axis, origin, antipode, locked, boring, armed, onBoreCom
       for (const st of STARS) {
         if (st.x * st.x + st.y * st.y < 0.45) continue; // keep out of the disc
         ctx.beginPath();
-        ctx.arc(cx + st.x * R * 1.35, cy + st.y * R * 1.35, st.r, 0, Math.PI * 2);
+        ctx.arc(cx + st.x * baseR * 1.35, cy + st.y * baseR * 1.35, st.r, 0, Math.PI * 2);
         ctx.fillStyle = `rgba(242,238,227,${st.a})`;
         ctx.fill();
       }
@@ -360,9 +489,9 @@ export function Globe({ axis, origin, antipode, locked, boring, armed, onBoreCom
           const b = proj(ring[(i + 1) % ring.length]);
           const aVis = front ? a.z > 0 : a.z <= 0;
           const bVis = front ? b.z > 0 : b.z <= 0;
-          const clip = (p: P, q: P) => {
-            const tt = p.z / (p.z - q.z);
-            return { x: p.x + (q.x - p.x) * tt, y: p.y + (q.y - p.y) * tt };
+          const clip = (p: P, q2: P) => {
+            const tt = p.z / (p.z - q2.z);
+            return { x: p.x + (q2.x - p.x) * tt, y: p.y + (q2.y - p.y) * tt };
           };
           if (aVis && bVis) {
             if (!pen) ctx.moveTo(a.x, a.y);
@@ -444,68 +573,109 @@ export function Globe({ axis, origin, antipode, locked, boring, armed, onBoreCom
       ctx.lineWidth = morph > 0.5 ? 1.4 : 1;
       ctx.stroke();
 
-      // Chord through the planet: the diameter joining the two points.
-      if (s.origin && s.antipode && morph < 0.02) {
+      // Markers. In the opened section they sit at the cut's ends; on the
+      // solid planet they track the real surface points and fade at limb.
+      const drawMarker = (v: Vec3, kind: "origin" | "anti") => {
+        const p = proj(v);
+        const face = clamp01((p.z + 0.12) / 0.3);
+        if (face <= 0) return;
         ctx.save();
-        ctx.setLineDash([1.5, 5]);
-        ctx.strokeStyle = ORANGE;
-        ctx.lineWidth = 5;
-        ctx.globalAlpha = 0.14;
-        ctx.beginPath();
-        ctx.moveTo(cx, cy - R);
-        ctx.lineTo(cx, cy + R);
-        ctx.stroke();
-        ctx.lineWidth = 1.4;
-        ctx.globalAlpha = s.locked ? 0.95 : 0.7;
-        ctx.beginPath();
-        ctx.moveTo(cx, cy - R);
-        ctx.lineTo(cx, cy + R);
-        ctx.stroke();
-        ctx.restore();
-      }
-
-      if (s.origin && s.antipode) {
-        // Origin marker (top): bone dot + quiet ring.
-        ctx.beginPath();
-        ctx.arc(cx, cy - R, 3, 0, Math.PI * 2);
-        ctx.fillStyle = BONE;
-        ctx.fill();
-        ctx.beginPath();
-        ctx.arc(cx, cy - R, 6.5, 0, Math.PI * 2);
-        ctx.strokeStyle = "rgba(242,238,227,0.5)";
-        ctx.lineWidth = 1;
-        ctx.stroke();
-
-        // Antipode marker (bottom): orange ember; ping when locked.
-        const t = now / 1000;
-        const glow = s.locked && !reduced ? 1 + Math.sin(t * 2.2) * 0.25 : 1;
-        const g = ctx.createRadialGradient(cx, cy + R, 0, cx, cy + R, 16 * glow);
-        g.addColorStop(0, `rgba(255,77,0,${s.boring && !s.boreDone ? 0.3 : 0.75})`);
-        g.addColorStop(1, "rgba(255,77,0,0)");
-        ctx.beginPath();
-        ctx.arc(cx, cy + R, 16 * glow, 0, Math.PI * 2);
-        ctx.fillStyle = g;
-        ctx.fill();
-        ctx.beginPath();
-        ctx.arc(cx, cy + R, 3.6, 0, Math.PI * 2);
-        ctx.fillStyle = ORANGE;
-        ctx.fill();
-        if (s.locked && !reduced) {
-          const ph = (t % 1.8) / 1.8;
+        ctx.globalAlpha = face;
+        if (kind === "origin") {
           ctx.beginPath();
-          ctx.arc(cx, cy + R, 4 + ph * 26, 0, Math.PI * 2);
-          ctx.strokeStyle = `rgba(255,77,0,${(1 - ph) * 0.45})`;
-          ctx.lineWidth = 1.2;
-          ctx.stroke();
-        }
-        if (s.locked) {
+          ctx.arc(p.x, p.y, 3, 0, Math.PI * 2);
+          ctx.fillStyle = BONE;
+          ctx.fill();
           ctx.beginPath();
-          ctx.arc(cx, cy + R, 5.5, 0, Math.PI * 2);
-          ctx.strokeStyle = PHOSPHOR;
-          ctx.globalAlpha = 0.8;
+          ctx.arc(p.x, p.y, 6.5, 0, Math.PI * 2);
+          ctx.strokeStyle = "rgba(242,238,227,0.5)";
           ctx.lineWidth = 1;
           ctx.stroke();
-          ctx.globalAlpha = 1;
+        } else {
+          const t = now / 1000;
+          const glow = s.locked && !reduced ? 1 + Math.sin(t * 2.2) * 0.25 : 1;
+          const g = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, 16 * glow);
+          g.addColorStop(0, `rgba(255,77,0,${s.boring && !s.boreDone ? 0.3 : 0.75})`);
+          g.addColorStop(1, "rgba(255,77,0,0)");
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, 16 * glow, 0, Math.PI * 2);
+          ctx.fillStyle = g;
+          ctx.fill();
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, 3.6, 0, Math.PI * 2);
+          ctx.fillStyle = ORANGE;
+          ctx.fill();
+          if (s.locked && !reduced) {
+            const ph = (t % 1.8) / 1.8;
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, 4 + ph * 26, 0, Math.PI * 2);
+            ctx.strokeStyle = `rgba(255,77,0,${(1 - ph) * 0.45})`;
+            ctx.lineWidth = 1.2;
+            ctx.stroke();
+          }
+          if (s.locked) {
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, 5.5, 0, Math.PI * 2);
+            ctx.strokeStyle = PHOSPHOR;
+            ctx.globalAlpha = 0.8 * face;
+            ctx.lineWidth = 1;
+            ctx.stroke();
+            ctx.globalAlpha = face;
+          }
+        }
+        ctx.restore();
+      };
+
+      if (s.origin && s.antipode) {
+        if (morph < 0.02) {
+          // The chord is the signal path — a diameter, drawn straight
+          // through the body between the two surface points.
+          const po = proj(s.origin);
+          const pa = proj(s.antipode);
+          ctx.save();
+          ctx.setLineDash([1.5, 5]);
+          ctx.strokeStyle = ORANGE;
+          ctx.lineWidth = 5;
+          ctx.globalAlpha = 0.14;
+          ctx.beginPath();
+          ctx.moveTo(po.x, po.y);
+          ctx.lineTo(pa.x, pa.y);
+          ctx.stroke();
+          ctx.lineWidth = 1.4;
+          ctx.globalAlpha = s.locked ? 0.95 : 0.7;
+          ctx.beginPath();
+          ctx.moveTo(po.x, po.y);
+          ctx.lineTo(pa.x, pa.y);
+          ctx.stroke();
+          ctx.restore();
+          drawMarker(s.origin, "origin");
+          drawMarker(s.antipode, "anti");
+        } else {
+          // Section diagram: fixed endpoints at the cut.
+          const top = { x: cx, y: cy - R };
+          const bot = { x: cx, y: cy + R };
+          ctx.save();
+          ctx.beginPath();
+          ctx.arc(top.x, top.y, 3, 0, Math.PI * 2);
+          ctx.fillStyle = BONE;
+          ctx.fill();
+          ctx.beginPath();
+          ctx.arc(top.x, top.y, 6.5, 0, Math.PI * 2);
+          ctx.strokeStyle = "rgba(242,238,227,0.5)";
+          ctx.lineWidth = 1;
+          ctx.stroke();
+          const g = ctx.createRadialGradient(bot.x, bot.y, 0, bot.x, bot.y, 16);
+          g.addColorStop(0, `rgba(255,77,0,${s.boring && !s.boreDone ? 0.3 : 0.75})`);
+          g.addColorStop(1, "rgba(255,77,0,0)");
+          ctx.beginPath();
+          ctx.arc(bot.x, bot.y, 16, 0, Math.PI * 2);
+          ctx.fillStyle = g;
+          ctx.fill();
+          ctx.beginPath();
+          ctx.arc(bot.x, bot.y, 3.6, 0, Math.PI * 2);
+          ctx.fillStyle = ORANGE;
+          ctx.fill();
+          ctx.restore();
         }
       }
 
@@ -536,7 +706,7 @@ export function Globe({ axis, origin, antipode, locked, boring, armed, onBoreCom
       // In reduced-motion mode, draw once per change then idle. The armed
       // flip re-enters through requestDraw, so a waiting probe can rest here.
       if (reduced) s.dirty = false;
-      if (!reduced || s.dirty || k < 1) {
+      if (!reduced || s.dirty || s.shots.length || s.pointers.size) {
         raf = requestAnimationFrame(draw);
       } else {
         raf = 0;
@@ -558,7 +728,9 @@ export function Globe({ axis, origin, antipode, locked, boring, armed, onBoreCom
       canvas.removeEventListener("pointermove", onMove);
       canvas.removeEventListener("pointerup", onUp);
       canvas.removeEventListener("pointercancel", onUp);
+      canvas.removeEventListener("wheel", onWheel);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [origin, antipode, locked]);
 
   return <canvas ref={canvasRef} className={className} aria-hidden="true" />;
