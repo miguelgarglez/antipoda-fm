@@ -7,6 +7,8 @@ type Props = {
   connecting: boolean;
   /** the stream is actually routed through the analyser */
   metered?: boolean;
+  /** called when the drawn line flips between real signal and carrier */
+  onCarrier?: (carrier: boolean) => void;
   className?: string;
 };
 
@@ -16,9 +18,13 @@ type Props = {
  * can't — the usual case for plain HTTP radio mounts — it draws a flat
  * carrier and says so. An invented waveform would be a lie.
  */
-export function Scope({ player, active, connecting, metered = false, className }: Props) {
+export function Scope({ player, active, connecting, metered = false, onCarrier, className }: Props) {
   const ref = useRef<HTMLCanvasElement>(null);
   const phase = useRef(0);
+  const lastWave = useRef<Float32Array | null>(null); // last real samples
+  const rest = useRef(0); // paused decay: 1 live trace → 0 quiet baseline
+  const carrier = useRef<boolean | null>(null);
+  const gvdbg = new URLSearchParams(window.location.search).has("gvdbg");
 
   useEffect(() => {
     const canvas = ref.current!;
@@ -34,7 +40,10 @@ export function Scope({ player, active, connecting, metered = false, className }
       const w = canvas.getBoundingClientRect().width;
       const h = canvas.getBoundingClientRect().height;
       const mid = h / 2;
-      ctx.clearRect(0, 0, w, h);
+      // Phosphor persistence: the last frames die slowly instead of a
+      // hard clear, so a real trace leaves a faint ghost of itself.
+      ctx.fillStyle = "rgba(4,5,8,0.55)";
+      ctx.fillRect(0, 0, w, h);
 
       // Faint center line + edge ticks.
       ctx.strokeStyle = "rgba(242,238,227,0.09)";
@@ -49,7 +58,45 @@ export function Scope({ player, active, connecting, metered = false, className }
       ctx.moveTo(w - 0.5, 4); ctx.lineTo(w - 0.5, h - 4);
       ctx.stroke();
 
-      const wave = metered && (active || connecting) ? player?.getWave() ?? null : null;
+      const running = active || connecting;
+      // Pause is a physical act on the trace: the last real samples settle
+      // to a quiet baseline instead of the line vanishing mid-frame.
+      rest.current += ((running ? 1 : 0) - rest.current) * Math.min(1, dt * 6);
+
+      let wave = metered && running ? (player?.getWave() ?? null) : null;
+      if (wave) {
+        // Only literal digital silence is treated as a dead analyser —
+        // the same 1e-6 bound the watchdog uses. Anything quieter but
+        // real still draws what it is: an honest, nearly flat trace.
+        let silent = true;
+        for (let i = 0; i < wave.length; i += 7) {
+          if (Math.abs(wave[i]) > 1e-6) {
+            silent = false;
+            break;
+          }
+        }
+        if (silent) wave = null;
+        else lastWave.current = wave; // the player's buffer is stable while paused
+      }
+      // Paused: ghost the last waveform decaying to rest. Connecting or
+      // unmetered live never borrows old samples.
+      const ghost =
+        !running && !wave && lastWave.current && rest.current > 0.02
+          ? lastWave.current
+          : null;
+      if (gvdbg) {
+        (window as unknown as { __meter: unknown }).__meter = {
+          src: player?.meterKind ?? "none",
+          real: wave !== null,
+        };
+      }
+      // The DOM note must track what is actually drawn, not what the
+      // plumbing believes — carrier on screen means carrier disclosed.
+      const onCarrierNow = running && !wave && !ghost;
+      if (onCarrierNow !== carrier.current) {
+        carrier.current = onCarrierNow;
+        onCarrier?.(onCarrierNow);
+      }
       phase.current += dt;
 
       ctx.beginPath();
@@ -60,12 +107,14 @@ export function Scope({ player, active, connecting, metered = false, className }
       // trace plus a slow pulse sweeping the band. Alive enough to read as
       // signal, honest enough that it never pretends to be the audio.
       const pulseX = ((t * 0.11) % 1) * w;
+      const amp = wave ? 1 : ghost ? rest.current : 0;
+      const disp = wave ?? ghost;
       for (let i = 0; i <= n; i++) {
         const x = (i / n) * w;
         let v = 0;
-        if (wave) {
-          const s = wave[Math.floor((i / n) * (wave.length - 1))];
-          v = s * (h * 0.44);
+        if (disp) {
+          const s = disp[Math.floor((i / n) * (disp.length - 1))];
+          v = s * (h * 0.44) * amp;
         } else if (connecting) {
           // Searching: restless jitter.
           v = Math.sin(i * 43.7 + t * 60) * Math.sin(i * 7.3) * h * 0.1;
@@ -85,11 +134,18 @@ export function Scope({ player, active, connecting, metered = false, className }
         else ctx.lineTo(x, mid - v);
       }
       const on = active || connecting;
-      ctx.strokeStyle = on
-        ? wave
-          ? `rgba(124,255,178,${0.55 + Math.min(0.35, peak / (h || 1))})`
-          : "rgba(124,255,178,0.32)"
-        : "rgba(255,77,0,0.35)";
+      // Green is earned: only a real trace or a live carrier wears it.
+      // The search jitter is amber — the colour of the journey, not
+      // of a signal that has not landed yet.
+      ctx.strokeStyle = wave
+        ? `rgba(124,255,178,${0.55 + Math.min(0.35, peak / (h || 1))})`
+        : ghost
+          ? "rgba(124,255,178,0.28)"
+          : connecting
+            ? "rgba(255,166,84,0.4)"
+            : on
+              ? "rgba(124,255,178,0.32)"
+              : "rgba(152,161,184,0.25)";
       ctx.lineWidth = 1.2;
       ctx.stroke();
 
@@ -121,7 +177,7 @@ export function Scope({ player, active, connecting, metered = false, className }
       cancelAnimationFrame(raf);
       ro.disconnect();
     };
-  }, [player, active, connecting, metered]);
+  }, [player, active, connecting, metered, onCarrier]);
 
   return <canvas ref={ref} className={className} aria-hidden="true" />;
 }

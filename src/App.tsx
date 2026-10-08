@@ -15,7 +15,7 @@ import {
 import { resolveSignals, stationDistanceKm, Station, TuneResult } from "./lib/radio";
 import { searchPlaces, describePlace, Place } from "./lib/geocode";
 import { Player, PlayerState } from "./lib/player";
-import { fetchThere, There } from "./lib/there";
+import { fetchThere, thereTime, There } from "./lib/there";
 import { Guide, guideSeen } from "./components/Guide";
 import { probeCors } from "./lib/probe";
 import { toggleSound, staticBurst, detentClick, lockBlip } from "./lib/sound";
@@ -57,6 +57,12 @@ export default function App() {
   if (guideOn) guideWasOnRef.current = true;
   const [globeTouched, setGlobeTouched] = useState(false);
   const [dialTouched, setDialTouched] = useState(false);
+  const [, setClock] = useState(0); // minute tick — keeps the antipode time moving
+  useEffect(() => {
+    if (!there) return;
+    const t = window.setInterval(() => setClock((c) => c + 1), 30_000);
+    return () => window.clearInterval(t);
+  }, [there]);
 
   const player = useRef<Player | null>(null);
   const candidatesRef = useRef<Station[]>([]);
@@ -753,7 +759,7 @@ export default function App() {
                   {tune.land.oceanKm !== null
                     ? `${tune.land.country.name} reads `
                     : "there it's "}
-                  <b>{there.time}</b>, {there.tempC}°, {there.phrase}
+                  <b>{thereTime(there.tz)}</b>, {there.tempC}°, {there.phrase}
                 </p>
               )}
               {!nearPoint && offPointKm !== null && (

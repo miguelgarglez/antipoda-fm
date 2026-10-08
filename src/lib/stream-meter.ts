@@ -26,7 +26,45 @@ const MP3_SR = [
   [11025, 12000, 8000],
 ];
 
-type Format = "aac" | "mp3";
+export type Format = "aac" | "mp3";
+
+/**
+ * Removes interleaved ICY metadata (<metaint audio><len><meta>) across
+ * arbitrary network chunk boundaries. Exported for tests.
+ */
+export class IcyStripper {
+  private audioLeft: number;
+  private metaLeft = 0;
+  private metaint: number;
+
+  constructor(metaint: number) {
+    this.metaint = metaint;
+    this.audioLeft = metaint > 0 ? metaint : Infinity;
+  }
+
+  feed(chunk: Uint8Array): Uint8Array {
+    if (this.metaint <= 0) return chunk;
+    const keep = new Uint8Array(chunk.length);
+    let kept = 0;
+    for (let k = 0; k < chunk.length; k++) {
+      if (this.metaLeft > 0) {
+        this.metaLeft--;
+      } else if (this.audioLeft === 0) {
+        this.metaLeft = chunk[k] * 16;
+        this.audioLeft = this.metaint;
+      } else {
+        this.audioLeft--;
+        keep[kept++] = chunk[k];
+      }
+    }
+    return keep.subarray(0, kept);
+  }
+}
+
+/** Frame length at i for the format; 0 needs more bytes; -1 not a sync. */
+export function nextFrame(fmt: Format, b: Uint8Array, i: number): number {
+  return fmt === "aac" ? adtsFrame(b, i) : mp3Frame(b, i);
+}
 
 export class StreamMeter {
   private ring = new Float32Array(RING);
@@ -37,11 +75,23 @@ export class StreamMeter {
   private decoder: AudioDecoder | null = null;
   private dead = true;
   private told = false;
+  private lastPcm = 0; // Date.now() of the last decoded sample
+  private startTimer: number | null = null;
+  private staleTimer: number | null = null;
   onDead: (() => void) | null = null;
 
-  /** Latest PCM window, chronological, or null before enough signal. */
+  /**
+   * Latest PCM window, chronological. Null before enough signal, and null
+   * again once samples go stale — a stalled connection returning the last
+   * waveform is not metering.
+   */
   getWave(): Float32Array | null {
-    if (this.dead || this.count < this.outBuf.length) return null;
+    if (
+      this.dead ||
+      this.count < this.outBuf.length ||
+      Date.now() - this.lastPcm > 1600
+    )
+      return null;
     const start = (this.head + this.count - this.outBuf.length + RING) % RING;
     for (let i = 0; i < this.outBuf.length; i++) {
       this.outBuf[i] = this.ring[(start + i) % RING];
@@ -66,6 +116,7 @@ export class StreamMeter {
       }
     }
     data.close();
+    this.lastPcm = Date.now();
     for (let i = 0; i < n; i++) {
       const pos = (this.head + this.count) % RING;
       this.ring[pos] = mono[i];
@@ -91,13 +142,30 @@ export class StreamMeter {
     this.abort = ctrl;
     this.dead = false;
     this.told = false;
+    // The deadline opens before the fetch — a server that never answers
+    // headers must not hold the meter forever either.
+    this.startTimer = window.setTimeout(() => {
+      if (this.count === 0) this.fail();
+    }, 8000);
+    // And once PCM flows, a permanent stall must hand the scope back to
+    // the carrier — getWave() already goes stale; this releases the
+    // fetch/decoder and tells the player why.
+    this.staleTimer = window.setInterval(() => {
+      if (!this.dead && this.count > 0 && Date.now() - this.lastPcm > 3000) {
+        this.fail();
+      }
+    }, 1000);
     let res: Response;
     try {
       res = await fetch(url, { signal: ctrl.signal });
     } catch {
+      this.kill();
       return false;
     }
-    if (!res.ok || !res.body) return false;
+    if (!res.ok || !res.body) {
+      this.kill();
+      return false;
+    }
     const ct = (res.headers.get("content-type") || "").toLowerCase();
     const metaint = Number(res.headers.get("icy-metaint")) || 0;
     const fmt = /aac|aacp|x-hx-aac|mp4a/.test(ct)
@@ -107,9 +175,12 @@ export class StreamMeter {
         : null; // ogg/m3u8/unknown — sniff bytes in the pump
     if (fmt) {
       const ok = await this.configure(fmt, null);
+      if (ctrl.signal.aborted) {
+        this.kill();
+        return false;
+      }
       if (!ok) {
-        ctrl.abort();
-        this.dead = true;
+        this.kill();
         return false;
       }
     }
@@ -177,7 +248,7 @@ export class StreamMeter {
         /* malformed config — try the next */
       }
     }
-    if (!config) return false;
+    if (!config || !this.abort || this.abort.signal.aborted) return false;
     try {
       this.decoder = new AudioDecoder({
         output: (d) => this.push(d),
@@ -190,10 +261,37 @@ export class StreamMeter {
     }
   }
 
+  /** Release the fetch, the decoder, and the samples. Idempotent. */
+  private kill() {
+    this.dead = true;
+    if (this.startTimer !== null) {
+      clearTimeout(this.startTimer);
+      this.startTimer = null;
+    }
+    if (this.staleTimer !== null) {
+      clearInterval(this.staleTimer);
+      this.staleTimer = null;
+    }
+    this.abort?.abort();
+    this.abort = null;
+    const d = this.decoder;
+    this.decoder = null;
+    if (d && d.state !== "closed") {
+      try {
+        d.close();
+      } catch {
+        /* already closed */
+      }
+    }
+    this.count = 0;
+    this.head = 0;
+  }
+
   private fail() {
     if (this.dead) return;
-    this.dead = true;
-    if (!this.told) {
+    const report = !this.told;
+    this.kill();
+    if (report) {
       this.told = true;
       this.onDead?.();
     }
@@ -206,32 +304,14 @@ export class StreamMeter {
     ctrl: AbortController,
   ) {
     const reader = res.body!.getReader();
+    const strip = new IcyStripper(metaint);
     let pending = new Uint8Array(0);
-    let audioLeft = metaint > 0 ? metaint : Infinity;
-    let metaLeft = 0;
     let ts = 0;
     try {
       for (;;) {
         const { value, done } = await reader.read();
         if (done || ctrl.signal.aborted) break;
-        let chunk: Uint8Array = value;
-        if (metaint > 0) {
-          // Strip interleaved ICY metadata: <metaint audio><len><meta>.
-          const keep = new Uint8Array(chunk.length);
-          let kept = 0;
-          for (let k = 0; k < chunk.length; k++) {
-            if (metaLeft > 0) {
-              metaLeft--;
-            } else if (audioLeft === 0) {
-              metaLeft = chunk[k] * 16;
-              audioLeft = metaint;
-            } else {
-              audioLeft--;
-              keep[kept++] = chunk[k];
-            }
-          }
-          chunk = keep.subarray(0, kept);
-        }
+        const chunk = strip.feed(value);
         if (chunk.length === 0) continue;
         const next = new Uint8Array(pending.length + chunk.length);
         next.set(pending);
@@ -249,7 +329,7 @@ export class StreamMeter {
 
         let consumed = 0;
         while (consumed < pending.length && !this.dead) {
-          const f = fmt === "aac" ? adtsFrame(pending, consumed) : mp3Frame(pending, consumed);
+          const f = nextFrame(fmt, pending, consumed);
           if (f === 0) break; // need more bytes
           if (f < 0) {
             consumed++;
@@ -277,7 +357,9 @@ export class StreamMeter {
       /* aborted or the network went away */
     } finally {
       try {
-        void reader.cancel();
+        // cancel() can reject (socket teardown) — swallow it, it is
+        // cleanup, not a failure state.
+        reader.cancel().catch(() => {});
       } catch {
         /* already closed */
       }
@@ -287,21 +369,8 @@ export class StreamMeter {
   }
 
   stop() {
-    if (this.dead && !this.abort) return;
-    this.dead = true;
     this.told = true; // an intentional stop is not a failure to report
-    this.abort?.abort();
-    this.abort = null;
-    if (this.decoder && this.decoder.state !== "closed") {
-      try {
-        this.decoder.close();
-      } catch {
-        /* already closed */
-      }
-    }
-    this.decoder = null;
-    this.count = 0;
-    this.head = 0;
+    this.kill();
   }
 }
 
@@ -316,8 +385,13 @@ function adtsFrame(b: Uint8Array, i: number): number {
   const fl = ((b[i + 3] & 3) << 11) | (b[i + 4] << 3) | ((b[i + 5] & 0xe0) >> 5);
   if (fl < 7) return -1;
   if (i + fl > b.length) return 0;
-  if (i + fl < b.length && !(b[i + fl] === 0xff && (b[i + fl + 1] & 0xf6) === 0xf0))
-    return -1; // sync that does not tile is coincidence, not a frame
+  if (i + fl < b.length) {
+    // Sync that does not tile is coincidence, not a frame — but only when
+    // the lookahead bytes exist. A lone trailing 0xff is consistent with
+    // the next frame's header and must not invalidate this one.
+    if (b[i + fl] !== 0xff) return -1;
+    if (i + fl + 1 < b.length && (b[i + fl + 1] & 0xf6) !== 0xf0) return -1;
+  }
   return fl;
 }
 

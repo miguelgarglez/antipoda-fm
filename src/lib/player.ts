@@ -3,10 +3,6 @@ import { StreamMeter } from "./stream-meter";
 
 export type PlayerState = "idle" | "connecting" | "playing" | "blocked" | "error";
 
-const gvdbg =
-  typeof window !== "undefined" &&
-  new URLSearchParams(window.location.search).has("gvdbg");
-
 /**
  * Wraps a single <audio> element. Every play() gets an attempt token; only
  * the latest attempt may report state, so stale errors and late HLS imports
@@ -45,6 +41,7 @@ export class Player {
   // purely to feed the scope.
   private meter: StreamMeter | null = null;
   private elemDead = false;
+  private disposed = false;
   private watchTimer: number | null = null;
   private silentTicks = 0;
   private lastCT = -1;
@@ -92,6 +89,13 @@ export class Player {
     return this.analyser !== null || this.meter !== null;
   }
 
+  /** Where the meter's data comes from right now — a test hook. */
+  get meterKind(): "element" | "decode" | "none" {
+    if (this.meter) return "decode";
+    if (this.analyser) return "element";
+    return "none";
+  }
+
   /** Latest time-domain samples, or null when the stream can't be analysed. */
   getWave(): Float32Array | null {
     const m = this.meter?.getWave();
@@ -104,18 +108,6 @@ export class Player {
   /** Decide before play() whether the next stream may be routed for metering. */
   setAnalyse(ok: boolean) {
     this.wantGraph = ok;
-  }
-
-  /** Meter state report: drives the UI flag and, under ?gvdbg, a test hook. */
-  private meterReport(on: boolean) {
-    this.onMeter(on);
-    if (gvdbg) {
-      (window as unknown as { __meter: { src: string; real: boolean } }).__meter =
-        {
-          src: this.meter ? "decode" : this.analyser ? "element" : "none",
-          real: on,
-        };
-    }
   }
 
   private set(s: PlayerState) {
@@ -146,7 +138,24 @@ export class Player {
   private async setupRoute(want: boolean, token: number): Promise<void> {
     if (want && this.elemDead) {
       // The element path proved silent earlier this session — skip the
-      // wasted graph and go straight to the decode meter.
+      // wasted re-wire and go straight to the decode meter. The graph,
+      // if one is still attached, still carries the audio out, so the
+      // context itself must be kept recovered.
+      const actx = this.actx;
+      if (actx && actx.state !== "running") {
+        try {
+          await Promise.race([actx.resume(), new Promise((r) => setTimeout(r, 350))]);
+        } catch {
+          /* stays suspended */
+        }
+      }
+      if (token !== this.attempt) return;
+      // Recovery failed while the element is still routed through the
+      // graph — that means silence, not metering. Rebuild direct
+      // playback first, then let the decode meter feed the scope.
+      if (this.sourceNode && this.actx?.state !== "running") {
+        this.rebuildDirect();
+      }
       void this.engageMeter();
       return;
     }
@@ -187,10 +196,14 @@ export class Player {
         // Replays must re-report: App resets metered=false on each tune,
         // and a reused graph would otherwise silently claim unmetered.
         if (this.analyser) {
-          this.meterReport(true);
+          this.onMeter(true);
           if (!this.meter && !this.elemDead) this.armWatch();
         }
       } else {
+        // A suspended context with the element still routed through the
+        // graph means dead air, not just a dead meter — rebuild direct
+        // playback so the user hears the stream.
+        if (this.sourceNode) this.rebuildDirect();
         // The context needs a real user activation (the bore completes on
         // an animation frame, not a gesture). The stream was fetched with
         // CORS — it survives a late wiring — so arm a retry on the next
@@ -213,6 +226,9 @@ export class Player {
       // listener, and clearing the shared ref before removing them would
       // strand the siblings.
       this.disarmGestureWire();
+      // Pause, retune, or dispose during the resume() await must stop
+      // this continuation from resurrecting wiring and listeners.
+      const att = this.attempt;
       const actx = this.actx;
       if (actx && actx.state !== "running") {
         // Inside the activation resume() resolves — but `state` only
@@ -224,6 +240,7 @@ export class Player {
           /* stays suspended */
         }
       }
+      if (this.disposed || att !== this.attempt) return;
       if (this.wantGraph && this.actx?.state === "running") {
         try {
           if (!this.sourceNode) {
@@ -237,7 +254,7 @@ export class Player {
             this.sourceNode.connect(this.analyser).connect(this.actx.destination);
           }
           if (this.analyser) {
-            this.meterReport(true);
+            this.onMeter(true);
             if (!this.meter && !this.elemDead) this.armWatch();
           }
         } catch {
@@ -246,7 +263,12 @@ export class Player {
       }
       // Still unmetered (a non-activation event fired, or the resume
       // timed out) — re-arm and wait for the next gesture.
-      if (this.wantGraph && (!this.analyser || this.actx?.state !== "running")) {
+      if (
+        !this.disposed &&
+        att === this.attempt &&
+        this.wantGraph &&
+        (!this.analyser || this.actx?.state !== "running")
+      ) {
         this.armGestureWire();
       }
     };
@@ -273,7 +295,7 @@ export class Player {
     if (this.watchTimer !== null) return;
     this.silentTicks = 0;
     this.lastCT = -1;
-    this.watchTimer = window.setInterval(() => this.watchTick(), 600);
+    this.watchTimer = window.setInterval(() => this.watchTick(), 450);
   }
 
   private disarmWatch() {
@@ -287,14 +309,23 @@ export class Player {
   private watchTick() {
     const an = this.analyser;
     const buf = this.waveBuf;
-    if (!an || !buf || !this.live || this.audio.paused) {
+    if (
+      !an ||
+      !buf ||
+      !this.live ||
+      this.audio.paused ||
+      this.actx?.state !== "running"
+    ) {
       this.silentTicks = 0;
       return;
     }
     const ct = this.audio.currentTime;
     const advancing = this.lastCT >= 0 && ct > this.lastCT + 0.05;
     this.lastCT = ct;
-    if (!advancing) return;
+    if (!advancing) {
+      this.silentTicks = 0;
+      return;
+    }
     an.getFloatTimeDomainData(buf);
     let peak = 0;
     for (let i = 0; i < buf.length; i++) peak = Math.max(peak, Math.abs(buf[i]));
@@ -302,6 +333,9 @@ export class Player {
       this.silentTicks = 0;
       return;
     }
+    // Exact zeros across four advancing checks while the context runs.
+    // Worst case for a rare truly-silent broadcast: the decode meter takes
+    // over and reports the same truth — an upgrade, not a lie.
     if (++this.silentTicks >= 4) {
       this.elemDead = true;
       this.disarmWatch();
@@ -316,31 +350,45 @@ export class Player {
    */
   private async engageMeter() {
     const url = this.lastUrl;
-    if (!this.wantGraph || !url || this.lastHls || this.meter) {
-      if (this.wantGraph && url && this.lastHls && !this.meter) this.meterReport(false);
+    if (!this.wantGraph || !url || this.meter) return;
+    if (this.lastHls || /\.m3u8(\?|$)/i.test(url)) {
+      this.onMeter(false);
       return;
     }
     const att = this.attempt;
     const meter = new StreamMeter();
+    // Own it before starting: pause/retune/dispose must reach the pending
+    // fetch, and a failure during startup must not strand it.
+    this.meter = meter;
     meter.onDead = () => {
       if (this.meter === meter) {
         this.meter = null;
-        this.meterReport(false);
+        if (this.attempt === att) this.onMeter(false);
       }
     };
     const ok = await meter.start(url);
-    // A newer play attempt took over, or a meter engaged meanwhile —
-    // retire this one rather than leave a second fetch running.
-    if (att !== this.attempt || this.meter) {
+    if (att !== this.attempt || this.meter !== meter || !ok) {
+      if (this.meter === meter) this.meter = null;
       meter.stop();
+      if (!ok && att === this.attempt) this.onMeter(false);
       return;
     }
-    if (!ok) {
-      this.meterReport(false);
-      return;
+    this.onMeter(true);
+  }
+
+  /**
+   * An element routed through a suspended context produces silence.
+   * Rebuild it for direct playback and restore its source, so failed
+   * context recovery can never leave the user hearing nothing.
+   */
+  private rebuildDirect() {
+    this.teardownRoute();
+    this.audio.crossOrigin = this.wantGraph ? "anonymous" : null;
+    if (this.lastHls) {
+      this.hls?.attachMedia(this.audio);
+    } else if (this.lastUrl) {
+      this.audio.src = this.lastUrl;
     }
-    this.meter = meter;
-    this.meterReport(true);
   }
 
   private teardownRoute() {
@@ -361,7 +409,7 @@ export class Player {
     this.sourceNode = null;
     this.analyser = null;
     this.waveBuf = null;
-    this.meterReport(false);
+    this.onMeter(false);
   }
 
   async play(url: string, isHls: boolean): Promise<void> {
@@ -369,6 +417,10 @@ export class Player {
     this.halt();
     this.lastUrl = url;
     this.lastHls = isHls;
+    // A new stream gets a fresh chance at the element path — silence on the
+    // last station must not permanently retire an analyser that would work
+    // here. On WebKit the watchdog simply re-proves the engine quirk.
+    this.elemDead = false;
     await this.setupRoute(this.wantGraph, token);
     if (token !== this.attempt) return;
     // Fetch CORS-mode whenever the probe passed — even if the graph is not
@@ -473,6 +525,8 @@ export class Player {
 
   /** Full teardown — the component is gone, close the context for good. */
   dispose() {
+    this.disposed = true;
+    this.wantGraph = false; // a pending gesture retry must not re-arm
     this.stop();
     this.disarmGestureWire();
     try {
