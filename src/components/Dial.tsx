@@ -7,6 +7,7 @@ type Props = {
   live: boolean; // station actually playing — green is earned by audio
   names?: string[]; // candidate names — shown under the needle while dragging
   onSelect: (i: number) => void;
+  onPreview?: (i: number) => void; // candidate under the needle, -1 when released
   onMove?: () => void; // called while the needle travels (static sound hook)
   onLock?: () => void; // called when the needle settles on a detent
   label: string; // aria description of the current detent
@@ -21,7 +22,7 @@ const PAD = 14; // px inside the track
  * damped spring that glides, overshoots a hair, and settles like a real
  * tuner. Noise speckle density follows needle speed.
  */
-export function Dial({ count, index, sweeping, live, names, onSelect, onMove, onLock, label }: Props) {
+export function Dial({ count, index, sweeping, live, names, onSelect, onPreview, onMove, onLock, label }: Props) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const st = useRef({
@@ -253,7 +254,11 @@ export function Dial({ count, index, sweeping, live, names, onSelect, onMove, on
         ctx.textAlign = "center";
         ctx.fillStyle = "rgba(242,238,227,0.9)";
         const tx = Math.min(Math.max(s.x, 84), w - 84);
-        ctx.fillText(nm.length > 26 ? nm.slice(0, 25) + "…" : nm, tx, 1);
+        ctx.fillText(
+          `${i + 1}/${s.count} · ${nm.length > 22 ? nm.slice(0, 21) + "…" : nm}`,
+          tx,
+          1,
+        );
       }
     }
 
@@ -327,9 +332,11 @@ export function Dial({ count, index, sweeping, live, names, onSelect, onMove, on
         x = detentX(near, s.w);
         if (near !== s.magIx) {
           s.magIx = near;
+          onPreview?.(near);
           onLock?.();
         }
       } else {
+        if (s.magIx !== -1) onPreview?.(-1);
         s.magIx = -1;
       }
     }
@@ -360,6 +367,7 @@ export function Dial({ count, index, sweeping, live, names, onSelect, onMove, on
     s.pid = null;
     s.magIx = -1;
     s.clickBurst = 0;
+    onPreview?.(-1);
     const i = nearestDetent(s.dragX, s.w);
     if (i !== index) onSelect(i);
     kick();
@@ -372,6 +380,7 @@ export function Dial({ count, index, sweeping, live, names, onSelect, onMove, on
     s.pid = null;
     s.magIx = -1;
     s.clickBurst = 0;
+    onPreview?.(-1);
     for (const t of s.burstT) window.clearTimeout(t);
     s.burstT = [];
     kick();

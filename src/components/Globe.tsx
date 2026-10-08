@@ -31,6 +31,9 @@ type Props = {
   axis: Vec3;
   origin: Vec3 | null;
   antipode: Vec3 | null;
+  /** The station the dial is auditioning — a second surface point,
+      distinct from the exact antipode marker. */
+  stationAt?: Vec3 | null;
   locked: boolean;
   /** Bore sequence: the disc opens into a cross-section while the probe descends. */
   boring: boolean;
@@ -135,7 +138,7 @@ function qAxisUp(axis: Vec3, facingHint: Vec3): Quat {
 
 type Shot = { at: number; dur: number; q1: Quat; z1: number };
 
-export function Globe({ axis, origin, antipode, locked, boring, armed, onBoreComplete, onInteract, className }: Props) {
+export function Globe({ axis, origin, antipode, stationAt, locked, boring, armed, onBoreComplete, onInteract, className }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const state = useRef({
     q: HOME_Q as Quat,
@@ -172,6 +175,7 @@ export function Globe({ axis, origin, antipode, locked, boring, armed, onBoreCom
     axis,
     origin,
     antipode,
+    stationAt: stationAt ?? null as Vec3 | null,
     onBoreComplete,
     onInteract,
   });
@@ -182,6 +186,7 @@ export function Globe({ axis, origin, antipode, locked, boring, armed, onBoreCom
   s.axis = axis;
   s.origin = origin;
   s.antipode = antipode;
+  s.stationAt = stationAt ?? null;
   s.onBoreComplete = onBoreComplete;
   s.onInteract = onInteract;
 
@@ -282,7 +287,7 @@ export function Globe({ axis, origin, antipode, locked, boring, armed, onBoreCom
     }
     s.dirty = true;
     s.requestDraw();
-  }, [origin, antipode, locked]);
+  }, [origin, antipode, stationAt, locked]);
 
   useEffect(() => {
     const canvas = canvasRef.current!;
@@ -810,6 +815,25 @@ export function Globe({ axis, origin, antipode, locked, boring, armed, onBoreCom
       ctx.lineWidth = morph > 0.5 ? 1.4 : 1;
       ctx.stroke();
 
+      // Surface labels must live inside the porthole — the anchor is
+      // clamped within the limb and the text grows toward the center,
+      // never under the bezel.
+      const edgeLabel = (p: P, txt: string) => {
+        const nx = (p.x - cx) / (Math.hypot(p.x - cx, p.y - cy) || 1);
+        const ny = (p.y - cy) / (Math.hypot(p.x - cx, p.y - cy) || 1);
+        let lx = p.x + nx * 11;
+        let ly = p.y + ny * 11;
+        const ld = Math.hypot(lx - cx, ly - cy);
+        const cap = R * 0.8;
+        if (ld > cap) {
+          lx = cx + ((lx - cx) / ld) * cap;
+          ly = cy + ((ly - cy) / ld) * cap;
+        }
+        ctx.textAlign = nx >= 0 ? "right" : "left";
+        ctx.textBaseline = "middle";
+        ctx.fillText(txt, lx, ly);
+      };
+
       // Markers. In the opened section they sit at the cut's ends; on the
       // solid planet they track the real surface points and fade at limb.
       const drawMarker = (v: Vec3, kind: "origin" | "anti") => {
@@ -824,15 +848,7 @@ export function Globe({ axis, origin, antipode, locked, boring, armed, onBoreCom
           ctx.font = "9.5px 'IBM Plex Mono', monospace";
           ctx.fillStyle =
             kind === "origin" ? "rgba(242,238,227,0.75)" : "rgba(255,77,0,0.8)";
-          const nx = (p.x - cx) / (Math.hypot(p.x - cx, p.y - cy) || 1);
-          const ny = (p.y - cy) / (Math.hypot(p.x - cx, p.y - cy) || 1);
-          ctx.textAlign = nx >= 0 ? "left" : "right";
-          ctx.textBaseline = "middle";
-          ctx.fillText(
-            kind === "origin" ? "you" : "antipode",
-            p.x + nx * 12,
-            p.y + ny * 12,
-          );
+          edgeLabel(p, kind === "origin" ? "you" : "antipode");
         }
         if (kind === "origin") {
           ctx.beginPath();
@@ -923,6 +939,38 @@ export function Globe({ axis, origin, antipode, locked, boring, armed, onBoreCom
           }
           drawMarker(s.origin, "origin");
           drawMarker(s.antipode, "anti");
+          // The auditioned station: a bone pip tethered to the exact
+          // point, so the "nearest" relationship is visible on the body,
+          // not just in metadata.
+          if (s.stationAt) {
+            const ps = proj(s.stationAt);
+            const sface = clamp01((ps.z + 0.12) / 0.3);
+            const aface = clamp01((pa.z + 0.12) / 0.3);
+            if (sface > 0) {
+              ctx.save();
+              ctx.globalAlpha = sface;
+              if (aface > 0) {
+                ctx.setLineDash([2, 4]);
+                ctx.strokeStyle = "rgba(242,238,227,0.4)";
+                ctx.lineWidth = 1;
+                ctx.beginPath();
+                ctx.moveTo(pa.x, pa.y);
+                ctx.lineTo(ps.x, ps.y);
+                ctx.stroke();
+                ctx.setLineDash([]);
+              }
+              ctx.beginPath();
+              ctx.arc(ps.x, ps.y, 3.2, 0, Math.PI * 2);
+              ctx.fillStyle = "#fff1e0";
+              ctx.fill();
+              ctx.beginPath();
+              ctx.arc(ps.x, ps.y, 6, 0, Math.PI * 2);
+              ctx.strokeStyle = "rgba(242,238,227,0.55)";
+              ctx.lineWidth = 1;
+              ctx.stroke();
+              ctx.restore();
+            }
+          }
         }
       } else if (morph < 0.02) {
         // No tune yet: the premise drawn on the object itself — a faint
@@ -954,12 +1002,8 @@ export function Globe({ axis, origin, antipode, locked, boring, armed, onBoreCom
           [a0, "you", "rgba(242,238,227,0.8)"],
           [a1, "the far side", "rgba(255,77,0,0.85)"],
         ] as const) {
-          const nx = (p.x - cx) / (Math.hypot(p.x - cx, p.y - cy) || 1);
-          const ny = (p.y - cy) / (Math.hypot(p.x - cx, p.y - cy) || 1);
           ctx.fillStyle = col;
-          ctx.textAlign = nx >= 0 ? "left" : "right";
-          ctx.textBaseline = "middle";
-          ctx.fillText(txt, p.x + nx * 10, p.y + ny * 10);
+          edgeLabel(p, txt);
         }
         // A pulse rides the diameter on a slow cycle — this is
         // transmission through the body, not decoration. The very first
@@ -1061,7 +1105,7 @@ export function Globe({ axis, origin, antipode, locked, boring, armed, onBoreCom
       canvas.removeEventListener("wheel", onWheel);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [origin, antipode, locked]);
+  }, [origin, antipode, stationAt, locked]);
 
   return (
     <canvas

@@ -76,12 +76,25 @@ await page.screenshot({ path: `${OUT}/02-dragged.png` });
 
 // --- wheel zoom ---
 // zoom is internal — measure via coast-style pixel delta after a wheel
+// settle-aware probe: snapshot, wheel, let the camera ease to target,
+// snapshot again — zoom must visibly reshape the scene.
+const frameHash = () =>
+  page.evaluate(() => {
+    const c = document.querySelector("canvas.globe");
+    const x = c.getContext("2d");
+    return Array.from(x.getImageData(0, 0, c.width, c.height).data);
+  });
 await page.mouse.move(cx, cy);
-await page.mouse.wheel(0, -600);
-await page.waitForTimeout(150);
-const zoomChange = await changeScore(200);
-console.log("wheel zoom px change:", zoomChange, zoomChange > 30 ? "PASS" : "FAIL");
-await page.mouse.wheel(0, 600);
+const fa = await frameHash();
+await page.mouse.wheel(0, -1200);
+await page.waitForTimeout(650);
+const fb = await frameHash();
+let zoomDiff = 0;
+for (let i = 0; i < fa.length; i += 4 * 499) {
+  if (Math.abs(fa[i] - fb[i]) + Math.abs(fa[i + 1] - fb[i + 1]) + Math.abs(fa[i + 2] - fb[i + 2]) > 24) zoomDiff++;
+}
+console.log("wheel zoom px change:", zoomDiff, zoomDiff > 30 ? "PASS" : "FAIL");
+await page.mouse.wheel(0, 1200);
 await page.waitForTimeout(700);
 
 // --- Madrid tune: catch the bore mid-flight ---
