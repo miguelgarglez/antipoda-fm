@@ -16,6 +16,7 @@ import { resolveSignals, stationDistanceKm, Station, TuneResult } from "./lib/ra
 import { searchPlaces, describePlace, Place } from "./lib/geocode";
 import { Player, PlayerState } from "./lib/player";
 import { fetchThere, There } from "./lib/there";
+import { Guide, guideSeen } from "./components/Guide";
 import { probeCors } from "./lib/probe";
 import { toggleSound, staticBurst, detentClick, lockBlip } from "./lib/sound";
 
@@ -47,6 +48,10 @@ export default function App() {
   const [prevName, setPrevName] = useState<string | null>(null); // crossfade tail
   const [snd, setSnd] = useState(false);
   const [dragHint, setDragHint] = useState(true);
+  const [guideOn, setGuideOn] = useState(() => !guideSeen());
+  const [guideRun, setGuideRun] = useState(0);
+  const [globeTouched, setGlobeTouched] = useState(false);
+  const [dialTouched, setDialTouched] = useState(false);
 
   const player = useRef<Player | null>(null);
   const candidatesRef = useRef<Station[]>([]);
@@ -414,6 +419,7 @@ export default function App() {
   const selectSignal = (i: number) => {
     if (i === stationIxRef.current || i < 0 || i >= candidatesRef.current.length) return;
     if (phaseRef.current !== "tuned" && phaseRef.current !== "tuning") return;
+    setDialTouched(true);
     pushLog(`retuning to signal ${i + 1}…`);
     tryStation(i);
   };
@@ -458,6 +464,17 @@ export default function App() {
           >
             {snd ? "FX·ON" : "FX·OFF"}
           </button>
+          <button
+            className="snd"
+            onClick={() => {
+              setGuideRun((r) => r + 1);
+              setGuideOn(true);
+            }}
+            aria-label="Replay the intro"
+            title="Replay the intro"
+          >
+            ?
+          </button>
           <div className="top-sub">the broadcast from underneath you</div>
         </div>
       </header>
@@ -466,6 +483,7 @@ export default function App() {
         <section
           className={`stage${boring ? " boring" : ""}${phase === "tuned" ? " on" : ""}`}
           aria-label="Earth"
+          onPointerDown={() => setGlobeTouched(true)}
         >
           <Globe
             className="globe"
@@ -494,7 +512,7 @@ export default function App() {
           {phase === "idle" && (
             <div className="idle-hints">
               <p className="earth-hint">12,742 km through the planet</p>
-              {dragHint && (
+              {dragHint && !guideOn && (
                 <button
                   className="drag-hint"
                   onClick={() => setDragHint(false)}
@@ -648,18 +666,20 @@ export default function App() {
                   carrier live — this stream can’t feed the meter
                 </p>
               )}
-              <Dial
-                count={candidatesRef.current.length}
-                index={stationIx}
-                sweeping={false}
-                live={playing}
-                onSelect={selectSignal}
-                onMove={() => snd && staticBurst(90, 0.028)}
-                onLock={() => {
-                  if (snd) detentClick();
-                }}
-                label={station.name}
-              />
+              <div onPointerDownCapture={() => setDialTouched(true)}>
+                <Dial
+                  count={candidatesRef.current.length}
+                  index={stationIx}
+                  sweeping={false}
+                  live={playing}
+                  onSelect={selectSignal}
+                  onMove={() => snd && staticBurst(90, 0.028)}
+                  onLock={() => {
+                    if (snd) detentClick();
+                  }}
+                  label={station.name}
+                />
+              </div>
               {tune.land.oceanKm !== null ? (
                 <p className="note">
                   your antipode is open ocean · nearest landfall{" "}
@@ -721,6 +741,19 @@ export default function App() {
           )}
         </section>
       </main>
+
+      {guideOn && (
+        <Guide
+          key={guideRun}
+          phase={phase}
+          globeTouched={globeTouched}
+          dialTouched={dialTouched}
+          onDone={() => {
+            setGuideOn(false);
+            setDragHint(false); // the guide already taught the grab
+          }}
+        />
+      )}
 
       <footer className="foot">
         <span>stations · radio-browser.info</span>
