@@ -122,8 +122,8 @@ body {
   border-color: rgba(124, 255, 178, 0.55);
 }
 
-/* The key that starts the journey — the receiver's own power key: a
-   breathing amber lamp, unmistakably a machine control. */
+/* The key that starts the journey — the receiver's power key: a
+   breathing signal lamp, the same hue the panel earns on air. */
 .key-go {
   display: inline-flex;
   align-items: center;
@@ -131,8 +131,8 @@ body {
   gap: 9px;
   font-size: 13px;
   color: var(--bone);
-  background: rgba(255, 77, 0, 0.12);
-  border-color: rgba(255, 120, 40, 0.6);
+  background: rgba(124, 255, 178, 0.09);
+  border-color: rgba(124, 255, 178, 0.45);
   padding: 11px 18px;
 }
 
@@ -141,23 +141,23 @@ body {
   height: 7px;
   flex: none;
   border-radius: 50%;
-  background: var(--signal);
-  box-shadow: 0 0 9px rgba(255, 77, 0, 0.9);
+  background: var(--phosphor);
+  box-shadow: 0 0 9px rgba(124, 255, 178, 0.85);
   animation: lamp-breathe 2.6s ease-in-out infinite;
 }
 
 @keyframes lamp-breathe {
   50% {
     opacity: 0.5;
-    box-shadow: 0 0 4px rgba(255, 77, 0, 0.5);
+    box-shadow: 0 0 4px rgba(124, 255, 178, 0.45);
   }
 }
 
 @media (hover: hover) and (pointer: fine) {
   .key-go:hover {
     color: #fff;
-    border-color: var(--signal);
-    background: rgba(255, 77, 0, 0.2);
+    border-color: var(--phosphor);
+    background: rgba(124, 255, 178, 0.16);
   }
 }
 
@@ -173,17 +173,18 @@ body {
   min-height: 0;
 }
 
-/* The receiver's face: porthole planet on the left, working side on
-   the right, and the strips edge to edge below. */
+/* The receiver's face: working side on the left, the porthole planet
+   set into the panel on the right, strips edge to edge below. */
 .rx-body {
   display: grid;
-  grid-template-columns: auto 1fr;
+  grid-template-columns: 1fr auto;
   align-items: center;
   column-gap: 18px;
-  padding: 8px 16px 8px 8px;
+  padding: 8px 8px 8px 16px;
 }
 
 .rx-well {
+  order: 2;
   position: relative;
   display: flex;
   align-items: center;
@@ -320,7 +321,7 @@ body {
   font-size: 11px;
   letter-spacing: 0.1em;
   text-transform: uppercase;
-  color: var(--signal);
+  color: rgba(242, 238, 227, 0.62);
   opacity: 0;
   animation: hint-in 600ms ease-out 500ms forwards;
 }
@@ -332,10 +333,10 @@ body {
 }
 
 .drag-hint {
-  font-family: var(--mono);
-  font-size: 11.5px;
-  letter-spacing: 0.06em;
-  color: var(--bone);
+  font-family: var(--disp);
+  font-size: 12px;
+  letter-spacing: 0.02em;
+  color: var(--slate-2);
   background: none;
   border: 0;
   padding: 6px;
@@ -374,7 +375,7 @@ body {
 }
 
 .lede {
-  font-family: var(--mono);
+  font-family: var(--disp);
   font-size: 13.5px;
   line-height: 1.7;
   color: rgba(242, 238, 227, 0.78);
@@ -426,24 +427,37 @@ input:focus-visible,
   margin-bottom: 2px;
 }
 
+.search-row {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+}
+
+/* The field reads as a field — a faint panel inset, not an underline. */
 .search input {
-  width: 100%;
-  font-family: var(--mono);
+  flex: 1;
+  min-width: 0;
+  font-family: var(--disp);
   font-size: 13.5px;
   color: var(--bone);
-  background: transparent;
-  border: 0;
-  border-bottom: 1px solid rgba(242, 238, 227, 0.34);
-  padding: 10px 2px;
+  background: rgba(0, 0, 0, 0.24);
+  border: 1px solid rgba(242, 238, 227, 0.2);
+  border-radius: 3px;
+  padding: 9px 10px;
   caret-color: var(--phosphor);
 }
 
 .search input::placeholder {
-  color: var(--slate);
+  color: rgba(152, 161, 184, 0.75);
 }
 
 .search input:focus {
-  border-bottom-color: var(--bone);
+  border-color: rgba(242, 238, 227, 0.5);
+}
+
+.search-go {
+  flex: none;
+  padding: 9px 14px;
 }
 
 .search input:focus:not(:focus-visible) {
@@ -470,8 +484,8 @@ input:focus-visible,
   display: block;
   width: 100%;
   text-align: left;
-  font-family: var(--mono);
-  font-size: 12px;
+  font-family: var(--disp);
+  font-size: 12.5px;
   color: var(--bone);
   background: none;
   border: 0;
@@ -493,9 +507,9 @@ input:focus-visible,
 /* Starting points as a sentence of links, not a row of capsules. */
 .quick {
   margin: 20px 0 0;
-  font-family: var(--mono);
-  font-size: 12.5px;
-  letter-spacing: 0.03em;
+  font-family: var(--disp);
+  font-size: 13px;
+  letter-spacing: 0.01em;
   color: var(--slate-2);
   line-height: 2;
 }
@@ -526,8 +540,8 @@ input:focus-visible,
 }
 
 .note {
-  font-family: var(--mono);
-  font-size: 12.5px;
+  font-family: var(--disp);
+  font-size: 13px;
   color: rgba(242, 238, 227, 0.68);
   line-height: 1.6;
   margin: 0;
@@ -650,10 +664,10 @@ input:focus-visible,
 
 .station-name {
   position: relative;
-  font-family: var(--mono);
-  font-size: clamp(1.1rem, 2.1vw, 1.45rem);
+  font-family: var(--disp);
+  font-size: clamp(1.15rem, 2.2vw, 1.5rem);
   font-weight: 500;
-  letter-spacing: 0.02em;
+  letter-spacing: 0.005em;
   line-height: 1.3;
   margin: 0;
   /* Two lines reserved — a retune must never move the scope or dial. */
@@ -665,9 +679,9 @@ input:focus-visible,
 }
 
 .rx-meta {
-  font-family: var(--mono);
-  font-size: 12.5px;
-  letter-spacing: 0.02em;
+  font-family: var(--disp);
+  font-size: 13.5px;
+  letter-spacing: 0.01em;
   color: rgba(242, 238, 227, 0.72);
   margin: 4px 0 0;
   line-height: 1.6;
@@ -731,18 +745,25 @@ input:focus-visible,
 }
 
 .scope-note {
-  font-family: var(--mono);
-  font-size: 10.5px;
-  letter-spacing: 0.06em;
+  font-family: var(--disp);
+  font-size: 11.5px;
+  letter-spacing: 0.02em;
   color: rgba(152, 161, 184, 0.9);
   margin: 0;
   padding: 7px 16px 0;
 }
 
+/* The strip is reserved even when empty — content swaps in place, the
+   instrument never shifts. */
+.scope-note.off,
+.rx-hint.off {
+  visibility: hidden;
+}
+
 /* One current status line during the hunt — no accumulating log. */
 .rx-status {
-  font-family: var(--mono);
-  font-size: 12.5px;
+  font-family: var(--disp);
+  font-size: 13px;
   color: rgba(242, 238, 227, 0.66);
   margin: 0;
   padding: 2px 16px 12px;
@@ -820,12 +841,12 @@ input:focus-visible,
   touch-action: none;
 }
 
-/* The one-line dial lesson — a whisper on the instrument, gone after
-   the first real drag. */
+/* The one-line dial lesson — a whisper on the instrument, swapped out
+   in place after the first real drag. */
 .rx-hint {
-  font-family: var(--mono);
-  font-size: 11px;
-  letter-spacing: 0.04em;
+  font-family: var(--disp);
+  font-size: 11.5px;
+  letter-spacing: 0.02em;
   color: var(--slate-2);
   margin: 0;
   padding: 4px 16px 10px;
@@ -840,8 +861,18 @@ input:focus-visible,
   border-top: 1px solid rgba(242, 238, 227, 0.07);
 }
 
+@media (min-width: 521px) {
+  /* The legend strip's fullest state is three rows — reserve it so a
+     locked signal never grows the chassis underneath itself. */
+  .rx-foot {
+    min-height: 88px;
+    align-items: flex-start;
+    align-content: flex-start;
+  }
+}
+
 /* The persistent readout: who you are and where the bore came out —
-   two deliberate geographic rows so the relation survives a narrow
+   deliberate geographic rows so the relation survives a narrow
    column intact. */
 .foot-geo {
   display: grid;
@@ -861,11 +892,51 @@ input:focus-visible,
   color: var(--slate-2);
 }
 
-/* While the instrument owns the column, credits step aside so the
-   composition never needs scroll on short desktop screens. */
-.ph-tuned .foot,
-.ph-tuning .foot {
-  display: none;
+/* Marker legend under the porthole — first arrival teaches which mark
+   is the exact point and which is the station. */
+.well-legend {
+  margin: 8px 0 0;
+  font-family: var(--disp);
+  font-size: 11px;
+  letter-spacing: 0.02em;
+  color: var(--slate-2);
+  text-align: center;
+}
+
+.lg-anti {
+  color: var(--signal);
+}
+
+.lg-stn {
+  color: var(--bone);
+}
+
+/* The crossing's scale claim, engraved in the working column while the
+   porthole shows the body. */
+.bore-readout {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px 16px 2px;
+  min-height: 52px;
+}
+
+.bore-km {
+  font-family: var(--mono);
+  font-size: 22px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  color: var(--bone);
+  font-variant-numeric: tabular-nums;
+  min-height: 1.25em;
+}
+
+.bore-layer {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  letter-spacing: 0.04em;
+  color: var(--signal);
+  min-height: 1.3em;
 }
 
 .copy-note {
@@ -886,31 +957,21 @@ input:focus-visible,
   margin: 10px 0 10px;
 }
 
-/* ---- footer ---- */
-
-.foot {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px 24px;
-  justify-content: space-between;
-  border-top: 1px solid rgba(242, 238, 227, 0.12);
-  padding-top: 12px;
-  margin-top: 14px;
-  font-family: var(--mono);
-  font-size: 10.5px;
-  letter-spacing: 0.04em;
+/* Credits fold into the instrument's legend strip — a disclosure that
+   belongs to the machine, not a marginal page credit. */
+.sources {
+  margin-left: auto;
+  font-family: var(--disp);
+  font-size: 12px;
   color: var(--slate-2);
+  align-self: center;
 }
 
-/* Credits fold into a disclosure — the attribution exists, but it is not
-   a second headline competing with the product. */
 .sources summary {
   cursor: pointer;
   list-style: none;
-}
-
-.sources summary::before {
-  content: "· ";
+  border-bottom: 1px solid rgba(242, 238, 227, 0.28);
+  padding-bottom: 1px;
 }
 
 .sources summary::-webkit-details-marker {
@@ -920,6 +981,7 @@ input:focus-visible,
 .sources[open] p {
   margin: 6px 0 0;
   line-height: 1.6;
+  white-space: nowrap;
 }
 
 @media (hover: hover) and (pointer: fine) {
@@ -960,7 +1022,11 @@ input:focus-visible,
     row-gap: 2px;
   }
   .rx-well {
+    order: 0;
     padding: 12px 8px 4px;
+  }
+  .well-legend {
+    display: none; /* the porthole column stays compact on a phone */
   }
   .well-disc {
     width: min(46vw, 190px);
@@ -1114,6 +1180,13 @@ input:focus-visible,
   }
   .rx-hint {
     padding: 2px 16px 6px;
+  }
+  .bore-readout {
+    min-height: 42px;
+    padding: 2px 16px 0;
+  }
+  .bore-km {
+    font-size: 17px;
   }
 }
 

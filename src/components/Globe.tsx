@@ -34,6 +34,12 @@ type Props = {
   /** The station the dial is auditioning — a second surface point,
       distinct from the exact antipode marker. */
   stationAt?: Vec3 | null;
+  /** The crossing's counter lives in the receiver column — written
+      into these spans each frame so it never overflows the porthole. */
+  boreOut?: React.RefObject<{
+    km: HTMLSpanElement | null;
+    layer: HTMLSpanElement | null;
+  }>;
   locked: boolean;
   /** Bore sequence: the disc opens into a cross-section while the probe descends. */
   boring: boolean;
@@ -138,7 +144,7 @@ function qAxisUp(axis: Vec3, facingHint: Vec3): Quat {
 
 type Shot = { at: number; dur: number; q1: Quat; z1: number };
 
-export function Globe({ axis, origin, antipode, stationAt, locked, boring, armed, onBoreComplete, onInteract, className }: Props) {
+export function Globe({ axis, origin, antipode, stationAt, boreOut, locked, boring, armed, onBoreComplete, onInteract, className }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const state = useRef({
     q: HOME_Q as Quat,
@@ -588,6 +594,13 @@ export function Globe({ axis, origin, antipode, stationAt, locked, boring, armed
         ctx.fill();
       }
 
+      // The porthole aperture: nothing the planet does may paint over
+      // the bezel — a punch-in reads as the world looming through glass.
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(cx, cy, baseR * 1.1, 0, Math.PI * 2);
+      ctx.clip();
+
       // Bore morph: 0 = wireframe planet, 1 = opened cross-section. The
       // timeline is wall-clock staged; only the reseal waits on `armed`.
       if (s.boring && !s.boreDone) {
@@ -815,21 +828,33 @@ export function Globe({ axis, origin, antipode, stationAt, locked, boring, armed
       ctx.lineWidth = morph > 0.5 ? 1.4 : 1;
       ctx.stroke();
 
-      // Surface labels must live inside the porthole — the anchor is
-      // clamped within the limb and the text grows toward the center,
+      // Surface labels must live inside the porthole — the measured text
+      // bounds are clamped within the limb, growing toward the center,
       // never under the bezel.
       const edgeLabel = (p: P, txt: string) => {
         const nx = (p.x - cx) / (Math.hypot(p.x - cx, p.y - cy) || 1);
         const ny = (p.y - cy) / (Math.hypot(p.x - cx, p.y - cy) || 1);
+        const tw = ctx.measureText(txt).width;
+        // The text grows inward from the anchor; its far end is the
+        // anchor. Clamp the anchor so the far end stays inside the limb.
+        const cap = Math.max(R * 0.55, Math.hypot(R * R - (R * 0.3) ** 2) - 6);
         let lx = p.x + nx * 11;
         let ly = p.y + ny * 11;
         const ld = Math.hypot(lx - cx, ly - cy);
-        const cap = R * 0.8;
         if (ld > cap) {
           lx = cx + ((lx - cx) / ld) * cap;
           ly = cy + ((ly - cy) / ld) * cap;
         }
+        // If the near (marker-side) end still pokes out, slide the whole
+        // run inward along the normal.
         ctx.textAlign = nx >= 0 ? "right" : "left";
+        const endx = nx >= 0 ? lx - tw : lx + tw;
+        const endd = Math.hypot(endx - cx, ly - cy);
+        if (endd > R - 4) {
+          const pull = endd - (R - 4);
+          lx -= nx * pull;
+          ly -= ny * pull;
+        }
         ctx.textBaseline = "middle";
         ctx.fillText(txt, lx, ly);
       };
@@ -870,10 +895,19 @@ export function Globe({ axis, origin, antipode, stationAt, locked, boring, armed
           ctx.arc(p.x, p.y, 16 * glow, 0, Math.PI * 2);
           ctx.fillStyle = g;
           ctx.fill();
+          // The exact point is a survey mark — a hollow crosshair, so the
+          // solid station pip beside it can never be mistaken for it.
+          ctx.strokeStyle = ORANGE;
+          ctx.lineWidth = 1.4;
           ctx.beginPath();
-          ctx.arc(p.x, p.y, 3.6, 0, Math.PI * 2);
-          ctx.fillStyle = ORANGE;
-          ctx.fill();
+          ctx.arc(p.x, p.y, 4.4, 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.beginPath();
+          for (const [dx, dy] of [[0, -1], [1, 0], [0, 1], [-1, 0]] as const) {
+            ctx.moveTo(p.x + dx * 5.6, p.y + dy * 5.6);
+            ctx.lineTo(p.x + dx * 8.4, p.y + dy * 8.4);
+          }
+          ctx.stroke();
           if (s.locked && !reduced) {
             const ph = (t % 1.8) / 1.8;
             ctx.beginPath();
@@ -1059,22 +1093,26 @@ export function Globe({ axis, origin, antipode, stationAt, locked, boring, armed
           ctx.restore();
       }
 
-      // Progress counter under the disc while boring — distance crossed
-      // is the headline (a whole planet is the claim); depth below the
-      // nearest surface rides underneath, falling back to 0 on exit.
-      if (s.boring && s.probeT >= 0 && morph > 0.5) {
-        const crossed = Math.round(s.probeT * DIAMETER_KM).toLocaleString("en-US");
-        const d = Math.min(s.probeT, 1 - s.probeT);
-        const depth = Math.round(d * DIAMETER_KM).toLocaleString("en-US");
-        ctx.textAlign = "center";
-        const textY = Math.min(cy + R + 34, h - 8);
-        ctx.font = "24px 'IBM Plex Mono', monospace";
-        ctx.fillStyle = "rgba(242,238,227,0.95)";
-        ctx.fillText(`${crossed} / ${DIAMETER_KM.toLocaleString("en-US")} km`, cx, textY - 16);
-        ctx.font = "11px 'IBM Plex Mono', monospace";
-        ctx.fillStyle = "rgba(152,161,184,0.9)";
-        ctx.fillText(`depth ${depth} km · ${layerAt(s.probeT)}`, cx, textY + 4);
+      // Progress counter — written into the receiver column, never the
+      // porthole: distance crossed is the headline (a whole planet is
+      // the claim); depth below the nearest surface rides underneath.
+      {
+        const bo = boreOut?.current;
+        if (bo?.km) {
+          if (s.boring && morph > 0.1) {
+            const crossed = Math.round(s.probeT * DIAMETER_KM).toLocaleString("en-US");
+            const d = Math.min(s.probeT, 1 - s.probeT);
+            const depth = Math.round(d * DIAMETER_KM).toLocaleString("en-US");
+            bo.km.textContent = `${crossed} / ${DIAMETER_KM.toLocaleString("en-US")} km`;
+            if (bo.layer) bo.layer.textContent = `depth ${depth} km · ${layerAt(s.probeT)}`;
+          } else {
+            bo.km.textContent = "";
+            if (bo.layer) bo.layer.textContent = "";
+          }
+        }
       }
+
+      ctx.restore(); // porthole aperture
 
       // In reduced-motion mode, draw once per change then idle. The armed
       // flip re-enters through requestDraw, so a waiting probe can rest here.

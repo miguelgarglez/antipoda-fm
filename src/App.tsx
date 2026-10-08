@@ -47,6 +47,12 @@ export default function App() {
   const [metered, setMetered] = useState(false);
   const [carrier, setCarrier] = useState(false); // scope draws the designed carrier
   const [previewIx, setPreviewIx] = useState(-1); // dial candidate under the needle
+  // The bore counter lives in the working column — Globe writes into
+  // these spans directly each frame, no React render per tick.
+  const boreOut = useRef<{ km: HTMLSpanElement | null; layer: HTMLSpanElement | null }>({
+    km: null,
+    layer: null,
+  });
   const [prevName, setPrevName] = useState<string | null>(null); // crossfade tail
   const [snd, setSnd] = useState(false);
   const [dragHint, setDragHint] = useState(true);
@@ -543,6 +549,7 @@ export default function App() {
                       locked={phase === "tuned" && playing}
                       boring={boring}
                       armed={armed}
+                      boreOut={boreOut}
                       onBoreComplete={onBoreComplete}
                       onInteract={() => setGlobeTouched(true)}
                     />
@@ -571,10 +578,16 @@ export default function App() {
                   aria-hidden="true"
                   tabIndex={-1}
                 >
-                  drag the planet
+                  spin the planet — the view only
                 </button>
               )}
             </div>
+          )}
+          {phase === "tuned" && (
+            <p className="well-legend" aria-hidden="true">
+              <span className="lg-anti">◌</span> exact point ·{" "}
+              <span className="lg-stn">●</span> station
+            </p>
           )}
                 </section>
               </div>
@@ -604,23 +617,35 @@ export default function App() {
                     <label className="search-label" htmlFor="place">
                       choose your starting place
                     </label>
-                    <input
-                      ref={placeInputRef}
-                      id="place"
-                      type="text"
-                      autoComplete="off"
-                      placeholder="Madrid, Tokyo, a peak…"
-                      value={query}
-                      onChange={(e) => setQuery(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (
-                          e.key === "Enter" &&
-                          places[0] &&
-                          placesFor.current === query.trim()
-                        )
-                          pickPlace(places[0]);
-                      }}
-                    />
+                    <div className="search-row">
+                      <input
+                        ref={placeInputRef}
+                        id="place"
+                        type="text"
+                        autoComplete="off"
+                        placeholder="Madrid, Tokyo, a peak…"
+                        value={query}
+                        onChange={(e) => setQuery(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (
+                            e.key === "Enter" &&
+                            places[0] &&
+                            placesFor.current === query.trim()
+                          )
+                            pickPlace(places[0]);
+                        }}
+                      />
+                      <button
+                        className="key search-go"
+                        disabled={
+                          !places[0] || placesFor.current !== query.trim()
+                        }
+                        onClick={() => places[0] && pickPlace(places[0])}
+                        aria-label="Tune from the first matching place"
+                      >
+                        tune
+                      </button>
+                    </div>
                     {places.length > 0 && (
                       <ul className="place-list">
                         {places.map((p, i) => (
@@ -656,6 +681,23 @@ export default function App() {
                     stop
                   </button>
                 </div>
+              </div>
+              {/* The crossing's scale claim lives in the working column —
+                  the Globe writes into these spans each frame, so the
+                  numbers never fight the porthole for space. */}
+              <div className="bore-readout" aria-hidden="true">
+                <span
+                  className="bore-km"
+                  ref={(el) => {
+                    boreOut.current.km = el;
+                  }}
+                />
+                <span
+                  className="bore-layer"
+                  ref={(el) => {
+                    boreOut.current.layer = el;
+                  }}
+                />
               </div>
               <div className="rx-plate">
                 <h2 className="station-name dim">
@@ -747,6 +789,11 @@ export default function App() {
                   </p>
                 )}
               </div>
+              {connecting && (
+                <p className="rx-status" role="status">
+                  {log.length ? log[log.length - 1] : `connecting to ${station.name}`}
+                </p>
+              )}
               </>
             )}
 
@@ -756,6 +803,7 @@ export default function App() {
                 <p className="lede">{failMsg}</p>
                 <div className="actions">
                   <button ref={failBtnRef} className="key key-go" onClick={reset}>
+                    <span className="key-lamp" aria-hidden="true" />
                     try another place
                   </button>
                 </div>
@@ -777,16 +825,20 @@ export default function App() {
                   metered={phase === "tuned" && metered}
                   onCarrier={setCarrier}
                 />
-                {phase === "tuned" && playing && carrier && (
-                  <p className="scope-note">
-                    carrier live — drawn, not measured
-                  </p>
-                )}
-                {phase === "tuned" && (
-                  <div
-                    className={`dial-lesson-slot${guideWasOnRef.current ? " held" : ""}`}
-                  />
-                )}
+                {/* Always mounted — an empty note holds its strip so the
+                    chassis never moves when the carrier honesty line
+                    appears. */}
+                <p
+                  className={`scope-note${phase === "tuned" && playing && carrier ? "" : " off"}`}
+                  aria-hidden={
+                    !(phase === "tuned" && playing && carrier) || undefined
+                  }
+                >
+                  carrier live — drawn, not measured
+                </p>
+                <div
+                  className={`dial-lesson-slot${guideWasOnRef.current ? " held" : ""}`}
+                />
                 <div
                   className="dial-wrap"
                   onPointerDownCapture={(e) => {
@@ -840,11 +892,14 @@ export default function App() {
                     ›
                   </button>
                 </div>
-                {phase === "tuned" && playing && !dialTouched && !guideOn && (
-                  <p className="rx-hint" role="status">
-                    each notch is another station — drag the strip
-                  </p>
-                )}
+                {/* Reserved strip — the whisper swaps in and out without
+                    moving the dial or the foot. */}
+                <p
+                  className={`rx-hint${phase === "tuned" && playing && !dialTouched && !guideOn ? "" : " off"}`}
+                  role="status"
+                >
+                  each notch is another station — drag the strip
+                </p>
               </>
             )}
 
@@ -875,6 +930,15 @@ export default function App() {
                     )}
                     {searchNote && <p className="note">{searchNote}</p>}
                     {searching && <p className="note dim">looking…</p>}
+                    {/* Attribution rides inside the instrument's legend
+                        strip, not a marginal page credit. */}
+                    <details className="sources">
+                      <summary>sources</summary>
+                      <p>
+                        stations · radio-browser.info · earth · natural earth ·
+                        weather · open-meteo
+                      </p>
+                    </details>
                   </>
                 )}
                 {phase === "tuning" && (
@@ -901,15 +965,12 @@ export default function App() {
                       <p className="note">
                         <b className="foot-you">you</b> ·{" "}
                         {tune.origin.label ?? formatCoord(tune.origin)}
-                        <span className="foot-arrow" aria-hidden="true">
-                          {" "}
-                          ⟶{" "}
-                        </span>
                       </p>
                       <p className="note">
+                        antipode {formatCoord(tune.antipode)} ·{" "}
                         {tune.land.oceanKm !== null
-                          ? `open ocean · nearest landfall ${tune.land.country.name}, ${formatKm(tune.land.oceanKm)} away`
-                          : `antipode ${formatCoord(tune.antipode)} · ${tune.land.country.name}`}
+                          ? `open ocean — nearest landfall ${tune.land.country.name}, ${formatKm(tune.land.oceanKm)} away`
+                          : tune.land.country.name}
                       </p>
                     </div>
                     {there && (
@@ -954,15 +1015,6 @@ export default function App() {
         />
       )}
 
-      <footer className="foot">
-        <details className="sources">
-          <summary>sources</summary>
-          <p>
-            stations · radio-browser.info · earth · natural earth · weather ·
-            open-meteo
-          </p>
-        </details>
-      </footer>
     </div>
   );
 }

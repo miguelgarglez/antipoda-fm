@@ -50,6 +50,7 @@ export function Dial({ count, index, sweeping, live, names, onSelect, onPreview,
     acc: 0, // pending seconds for the fixed-substep spring solver
     flashIx: -1, // detent that just locked — flashes its notch
     flashUntil: 0,
+    prevIx: -1, // candidate last reported to onPreview — single source
     live,
   });
   st.current.count = count;
@@ -243,7 +244,8 @@ export function Dial({ count, index, sweeping, live, names, onSelect, onPreview,
     }
 
     // While dragging, the name under the needle is the preview — you hear
-    // it before you commit to it.
+    // it before you commit to it. The same index drives the globe pip and
+    // this label, so the two can never disagree.
     const names = s.names;
     if (s.dragging && names && names.length) {
       const i = s.magIx >= 0 ? s.magIx : nearestDetent(s.dragX, w);
@@ -254,11 +256,9 @@ export function Dial({ count, index, sweeping, live, names, onSelect, onPreview,
         ctx.textAlign = "center";
         ctx.fillStyle = "rgba(242,238,227,0.9)";
         const tx = Math.min(Math.max(s.x, 84), w - 84);
-        ctx.fillText(
-          `${i + 1}/${s.count} · ${nm.length > 22 ? nm.slice(0, 21) + "…" : nm}`,
-          tx,
-          1,
-        );
+        const role = i === s.index ? "playing" : "release to tune";
+        const short = nm.length > 16 ? nm.slice(0, 15) + "…" : nm;
+        ctx.fillText(`${role} · ${i + 1}/${s.count} · ${short}`, tx, 1);
       }
     }
 
@@ -307,6 +307,16 @@ export function Dial({ count, index, sweeping, live, names, onSelect, onPreview,
     return Math.min(r.width, Math.max(0, e.clientX - r.left));
   };
 
+  // The candidate the drag label names is also the candidate the globe
+  // previews — one source of truth for both surfaces.
+  const reportPreview = (ix: number) => {
+    const s = st.current;
+    if (ix !== s.prevIx) {
+      s.prevIx = ix;
+      onPreview?.(ix);
+    }
+  };
+
   const onPointerDown = (e: React.PointerEvent) => {
     if (count < 1 || st.current.pid !== null) return; // one active pointer
     const s = st.current;
@@ -315,6 +325,7 @@ export function Dial({ count, index, sweeping, live, names, onSelect, onPreview,
     s.dragX = posFromEvent(e);
     s.lastX = s.dragX;
     s.clickBurst = 0;
+    reportPreview(nearestDetent(s.dragX, s.w));
     canvasRef.current!.setPointerCapture(e.pointerId);
     kick();
   };
@@ -332,14 +343,13 @@ export function Dial({ count, index, sweeping, live, names, onSelect, onPreview,
         x = detentX(near, s.w);
         if (near !== s.magIx) {
           s.magIx = near;
-          onPreview?.(near);
           onLock?.();
         }
       } else {
-        if (s.magIx !== -1) onPreview?.(-1);
         s.magIx = -1;
       }
     }
+    reportPreview(s.magIx >= 0 ? s.magIx : nearestDetent(x, s.w));
     // Fast drags may jump over detents between events — each crossing
     // still earns its click, staggered so it reads as a sequence.
     const lo = Math.min(s.lastX, x);
@@ -367,12 +377,13 @@ export function Dial({ count, index, sweeping, live, names, onSelect, onPreview,
     s.pid = null;
     s.magIx = -1;
     s.clickBurst = 0;
-    onPreview?.(-1);
+    reportPreview(-1);
     const i = nearestDetent(s.dragX, s.w);
     if (i !== index) onSelect(i);
     kick();
   };
-  // A cancelled gesture restores the tuned detent instead of retuning.
+  // A cancelled gesture — including a lost pointer capture — restores
+  // the tuned detent instead of retuning or staying stuck dragging.
   const onPointerCancel = () => {
     const s = st.current;
     if (!s.dragging) return;
@@ -380,7 +391,7 @@ export function Dial({ count, index, sweeping, live, names, onSelect, onPreview,
     s.pid = null;
     s.magIx = -1;
     s.clickBurst = 0;
-    onPreview?.(-1);
+    reportPreview(-1);
     for (const t of s.burstT) window.clearTimeout(t);
     s.burstT = [];
     kick();
@@ -428,6 +439,7 @@ export function Dial({ count, index, sweeping, live, names, onSelect, onPreview,
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
         onPointerCancel={onPointerCancel}
+        onLostPointerCapture={onPointerCancel}
       />
     </div>
   );
