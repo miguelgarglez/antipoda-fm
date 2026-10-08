@@ -193,7 +193,7 @@ export default function App() {
       setBoreDone(false);
       setThere(null);
       setMetered(false);
-      pendingOrigin.current = origin;
+      setPendingOrigin(origin);
       const anti = antipodeOf(origin);
       pushLog("piercing the planet…");
 
@@ -289,7 +289,9 @@ export default function App() {
 
   // Debounced place search; results from superseded queries are dropped.
   // Every run bumps the sequence — including clears — so a late reply can
-  // never repopulate a stale field.
+  // never repopulate a stale field. Results are also tagged with their
+  // query: Enter may only pick what the visitor is actually looking at.
+  const placesFor = useRef("");
   useEffect(() => {
     const seq = ++searchSeq.current;
     if (query.trim().length < 2) {
@@ -304,6 +306,7 @@ export default function App() {
       try {
         const res = await searchPlaces(q);
         if (seq !== searchSeq.current) return;
+        placesFor.current = q;
         setPlaces(res);
         setSearchNote(res.length === 0 ? "nothing on the map by that name" : null);
       } catch {
@@ -363,13 +366,16 @@ export default function App() {
     return POLE_AXIS;
   }, [tune, phase]);
 
-  const pendingOrigin = useRef<GeoPoint | null>(null);
+  // State, not a ref: the geolocation path sets phase="tuning" first and
+  // fills in the origin later — the camera prelude must react when it
+  // finally resolves, not stay aimed at the (0,0) placeholder.
+  const [pendingOrigin, setPendingOrigin] = useState<GeoPoint | null>(null);
   const axisVec: Vec3 = useMemo(() => {
-    if (pendingOrigin.current && phase === "tuning") {
-      return latLonToVec3(pendingOrigin.current.lat, pendingOrigin.current.lon);
+    if (pendingOrigin && phase === "tuning") {
+      return latLonToVec3(pendingOrigin.lat, pendingOrigin.lon);
     }
     return axis;
-  }, [axis, phase]);
+  }, [axis, phase, pendingOrigin]);
 
   const originVec = useMemo(
     () => (tune ? latLonToVec3(tune.origin.lat, tune.origin.lon) : null),
@@ -390,7 +396,7 @@ export default function App() {
     selToken.current++;
     player.current?.stop();
     candidatesRef.current = [];
-    pendingOrigin.current = null;
+    setPendingOrigin(null);
     setTune(null);
     setPhase("idle");
     setLog([]);
@@ -467,6 +473,10 @@ export default function App() {
           <button
             className="snd"
             onClick={() => {
+              // A replay teaches the gestures again — the lessons it
+              // carries must see untouched controls or it skips itself.
+              setGlobeTouched(false);
+              setDialTouched(false);
               setGuideRun((r) => r + 1);
               setGuideOn(true);
             }}
@@ -553,7 +563,12 @@ export default function App() {
                     value={query}
                     onChange={(e) => setQuery(e.target.value)}
                     onKeyDown={(e) => {
-                      if (e.key === "Enter" && places[0]) pickPlace(places[0]);
+                      if (
+                        e.key === "Enter" &&
+                        places[0] &&
+                        placesFor.current === query.trim()
+                      )
+                        pickPlace(places[0]);
                     }}
                   />
                   {places.length > 0 && (

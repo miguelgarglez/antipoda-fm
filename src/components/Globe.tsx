@@ -134,7 +134,7 @@ export function Globe({ axis, origin, antipode, locked, boring, armed, onBoreCom
     zoom: 1,
     zoomT: 1,
     wvel: [0, 0, 0] as Vec3, // view-space angular velocity, rad/s
-    pointers: new Map<number, { x: number; y: number }>(),
+    pointers: new Map<number, { x: number; y: number; t: number }>(),
     pinch0: 0,
     pinchZoom0: 1,
     shots: [] as Shot[],
@@ -149,6 +149,7 @@ export function Globe({ axis, origin, antipode, locked, boring, armed, onBoreCom
     flashes: [] as { t: number; at: number }[],
     crossed: new Set<number>(),
     hadMarkers: false,
+    boreAxis: null as Vec3 | null, // the axis the queued shots were aimed at
     lastT: 0,
     dirty: true,
     requestDraw: () => {},
@@ -185,12 +186,20 @@ export function Globe({ axis, origin, antipode, locked, boring, armed, onBoreCom
     const now = performance.now();
     const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     if (boring) {
+      // The geolocation path enters tuning before it knows where "here"
+      // is — if the axis materially changes mid-bore, re-aim the prelude
+      // and rebase the probe clock to the corrected camera. An identical
+      // re-rendered vector (pending origin -> resolved tune) must not
+      // restart a sequence already in flight.
+      const reaim = s.boreAxis !== null && dot(s.boreAxis, s.axis) < 0.9999;
+      if (s.boring && s.boreAxis !== null && !reaim) return;
+      s.boreAxis = s.axis;
       s.boreDone = false;
       s.crossed.clear();
       s.resealing = false;
       s.holdStart = 0;
       s.boreStart = now + (reduced ? 0 : PRE_BORE);
-      if (s.probeT < 0) s.probeT = 0;
+      if (s.probeT < 0 || reaim) s.probeT = 0;
       if (!reduced) {
         queueShots([
           { at: now, dur: SHOT_MS.toOrigin, q1: qLookAt(s.axis, NORTH), z1: 1.45 },
@@ -206,6 +215,7 @@ export function Globe({ axis, origin, antipode, locked, boring, armed, onBoreCom
       s.probeT = -1;
       s.flashes = [];
       s.resealing = false;
+      s.boreAxis = null; // next bore re-aims fresh — even to the same spot
       // The bore resealed — reveal the far side, then hand the planet
       // back to the user.
       if (s.boreDone && s.antipode && !reduced) {
@@ -219,7 +229,7 @@ export function Globe({ axis, origin, antipode, locked, boring, armed, onBoreCom
     s.dirty = true;
     s.requestDraw();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [boring]);
+  }, [boring, axis]);
 
   // `armed` only needs to wake a sleeping (reduced-motion) loop — the bore
   // clock must NOT restart when it lands mid-sequence.
@@ -235,11 +245,17 @@ export function Globe({ axis, origin, antipode, locked, boring, armed, onBoreCom
     if (!origin && s.hadMarkers) {
       const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
       s.hadMarkers = false;
-      s.shots = reduced ? [] : [{ at: performance.now(), dur: 700, q1: HOME_Q, z1: 1 }];
       if (reduced) {
+        s.shots = [];
+        s.shotFrom = null;
         s.q = HOME_Q;
         s.zoom = 1;
         s.zoomT = 1;
+        s.wvel = [0, 0, 0];
+      } else {
+        // queueShots clears shotFrom — a reset mid-flight must not
+        // inherit the aborted shot's start point or clock.
+        queueShots([{ at: performance.now(), dur: 700, q1: HOME_Q, z1: 1 }]);
       }
       s.zoomT = s.shots.length ? s.zoomT : 1;
       s.wvel = [0, 0, 0];
@@ -251,14 +267,15 @@ export function Globe({ axis, origin, antipode, locked, boring, armed, onBoreCom
   useEffect(() => {
     const canvas = canvasRef.current!;
     const ctx = canvas.getContext("2d")!;
-    const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const rmq = window.matchMedia("(prefers-reduced-motion: reduce)");
     let raf = 0;
     let cssSize = 0;
     let baseR = 0;
     let dead = false;
 
     const requestDraw = () => {
-      if (!dead && reduced && raf === 0) raf = requestAnimationFrame(draw);
+      // Read live — the preference can change while the loop is mounted.
+      if (!dead && rmq.matches && raf === 0) raf = requestAnimationFrame(draw);
     };
     state.current.requestDraw = requestDraw;
 
@@ -281,8 +298,12 @@ export function Globe({ axis, origin, antipode, locked, boring, armed, onBoreCom
     // --- Direct manipulation: grab the planet ---
     const onDown = (e: PointerEvent) => {
       const s = state.current;
-      canvas.setPointerCapture(e.pointerId);
-      s.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      try {
+        canvas.setPointerCapture(e.pointerId);
+      } catch {
+        /* synthetic or already-dead pointer — track anyway */
+      }
+      s.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY, t: e.timeStamp });
       if (s.pointers.size === 2) {
         const [a, b] = [...s.pointers.values()];
         s.pinch0 = Math.hypot(a.x - b.x, a.y - b.y) || 1;
@@ -301,7 +322,8 @@ export function Globe({ axis, origin, antipode, locked, boring, armed, onBoreCom
       if (!p) return;
       const dx = e.clientX - p.x;
       const dy = e.clientY - p.y;
-      s.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      const dtms = Math.min(250, Math.max(1, e.timeStamp - p.t)); // real elapsed, not assumed
+      s.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY, t: e.timeStamp });
       if (s.pointers.size === 2) {
         const [a, b] = [...s.pointers.values()];
         const d = Math.hypot(a.x - b.x, a.y - b.y) || 1;
@@ -319,7 +341,6 @@ export function Globe({ axis, origin, antipode, locked, boring, armed, onBoreCom
       const ax = norm([dy, dx, 0]);
       s.q = qNorm(qMul(qAxis(ax, theta), s.q));
       // Track release inertia as an EMA of instantaneous angular speed.
-      const dtms = 16; // pointer events arrive ~per frame
       const inst = theta / (dtms / 1000);
       s.wvel = add(scale(s.wvel, 0.65), scale(ax, inst * 0.35));
       s.dirty = true;
@@ -327,8 +348,27 @@ export function Globe({ axis, origin, antipode, locked, boring, armed, onBoreCom
     };
     const onUp = (e: PointerEvent) => {
       const s = state.current;
+      const p = s.pointers.get(e.pointerId);
       s.pointers.delete(e.pointerId);
+      // A held-still release shouldn't fling — expire stale velocity.
+      if (p && e.timeStamp - p.t > 120) s.wvel = [0, 0, 0];
+      if (s.pointers.size === 2) {
+        // A finger left a multi-touch pinch — rebase on the new pair or
+        // the next move jumps zoom against the old pair's distance.
+        const [a, b] = [...s.pointers.values()];
+        s.pinch0 = Math.hypot(a.x - b.x, a.y - b.y) || 1;
+        s.pinchZoom0 = s.zoomT;
+      }
       if (s.pointers.size < 2) s.pinch0 = 0;
+      if (s.pointers.size === 0) canvas.style.cursor = "grab";
+      s.dirty = true;
+      s.requestDraw();
+    };
+    const onCancel = (e: PointerEvent) => {
+      const s = state.current;
+      s.pointers.delete(e.pointerId);
+      s.wvel = [0, 0, 0]; // a cancelled gesture never flings
+      s.pinch0 = 0;
       if (s.pointers.size === 0) canvas.style.cursor = "grab";
       s.dirty = true;
       s.requestDraw();
@@ -344,10 +384,55 @@ export function Globe({ axis, origin, antipode, locked, boring, armed, onBoreCom
       s.dirty = true;
       s.requestDraw();
     };
+    // Keyboard control of the same body: arrows rotate in the direction a
+    // drag would move it, +/- zoom, 0 or Home returns to the home view.
+    const onKey = (e: KeyboardEvent) => {
+      const s = state.current;
+      const step = 0.28; // ~16° per press
+      let used = true;
+      switch (e.key) {
+        case "ArrowLeft":
+          s.q = qNorm(qMul(qAxis([0, 1, 0], -step), s.q));
+          break;
+        case "ArrowRight":
+          s.q = qNorm(qMul(qAxis([0, 1, 0], step), s.q));
+          break;
+        case "ArrowUp":
+          s.q = qNorm(qMul(qAxis([1, 0, 0], -step), s.q));
+          break;
+        case "ArrowDown":
+          s.q = qNorm(qMul(qAxis([1, 0, 0], step), s.q));
+          break;
+        case "+":
+        case "=":
+          s.zoomT = clamp(s.zoomT * 1.18, ZOOM_MIN, ZOOM_MAX);
+          break;
+        case "-":
+        case "_":
+          s.zoomT = clamp(s.zoomT / 1.18, ZOOM_MIN, ZOOM_MAX);
+          break;
+        case "0":
+        case "Home":
+          s.q = HOME_Q;
+          s.zoomT = 1;
+          s.wvel = [0, 0, 0];
+          break;
+        default:
+          used = false;
+      }
+      if (used) {
+        e.preventDefault();
+        s.shots = []; // keyboard input takes the camera back too
+        s.shotFrom = null;
+        s.dirty = true;
+        s.requestDraw();
+      }
+    };
     canvas.addEventListener("pointerdown", onDown);
     canvas.addEventListener("pointermove", onMove);
     canvas.addEventListener("pointerup", onUp);
-    canvas.addEventListener("pointercancel", onUp);
+    canvas.addEventListener("pointercancel", onCancel);
+    canvas.addEventListener("keydown", onKey);
     canvas.addEventListener("wheel", onWheel, { passive: false });
     canvas.style.touchAction = "none";
     canvas.style.cursor = "grab";
@@ -357,6 +442,7 @@ export function Globe({ axis, origin, antipode, locked, boring, armed, onBoreCom
       const s = state.current;
       const dt = s.lastT ? Math.min(0.05, (now - s.lastT) / 1000) : 0;
       s.lastT = now;
+      const reduced = rmq.matches; // live read — flips mid-session take effect
 
       const moving = !reduced || s.dirty;
 
@@ -364,7 +450,10 @@ export function Globe({ axis, origin, antipode, locked, boring, armed, onBoreCom
       if (s.shots.length && !s.pointers.size) {
         const nx = s.shots[0];
         if (now >= nx.at) {
-          if (!s.shotFrom) s.shotFrom = { q: s.q, z: s.zoom, t0: now };
+          // The shot's clock is its scheduled `at`, not first-processed
+          // frame — after a suspended tab the camera lands in the same
+          // place the bore's wall-clock timeline expects.
+          if (!s.shotFrom) s.shotFrom = { q: s.q, z: s.zoom, t0: nx.at };
           const k = reduced || nx.dur <= 0 ? 1 : Math.min(1, (now - s.shotFrom.t0) / nx.dur);
           const e = easeInOut(k);
           s.q = qSlerp(s.shotFrom.q, nx.q1, e);
@@ -378,7 +467,9 @@ export function Globe({ axis, origin, antipode, locked, boring, armed, onBoreCom
           }
         }
       } else {
-        s.zoom += (s.zoomT - s.zoom) * Math.min(1, 11 * dt);
+        // Reduced motion draws a single frame per change — snap the zoom
+        // or a wheel tick would strand the camera partway to its target.
+        s.zoom = reduced ? s.zoomT : s.zoom + (s.zoomT - s.zoom) * Math.min(1, 11 * dt);
         if (moving && dt > 0 && !s.pointers.size) {
           const sp = Math.hypot(s.wvel[0], s.wvel[1], s.wvel[2]);
           if (gvdbg) (window as unknown as { __gv: number }).__gv = sp; // test hook
@@ -731,11 +822,21 @@ export function Globe({ axis, origin, antipode, locked, boring, armed, onBoreCom
       canvas.removeEventListener("pointerdown", onDown);
       canvas.removeEventListener("pointermove", onMove);
       canvas.removeEventListener("pointerup", onUp);
-      canvas.removeEventListener("pointercancel", onUp);
+      canvas.removeEventListener("pointercancel", onCancel);
+      canvas.removeEventListener("keydown", onKey);
       canvas.removeEventListener("wheel", onWheel);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [origin, antipode, locked]);
 
-  return <canvas ref={canvasRef} className={className} aria-hidden="true" />;
+  return (
+    <canvas
+      ref={canvasRef}
+      className={className}
+      tabIndex={0}
+      role="application"
+      aria-roledescription="3D planet"
+      aria-label="Interactive planet. Arrow keys rotate it, plus and minus zoom, zero resets the view."
+    />
+  );
 }

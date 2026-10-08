@@ -48,8 +48,12 @@ export async function fetchThere(p: GeoPoint): Promise<There | null> {
       `&longitude=${p.lon.toFixed(3)}&current=temperature_2m,weather_code,is_day&timezone=auto`;
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), 8000);
-    const res = await fetch(url, { signal: ctrl.signal });
-    clearTimeout(timer);
+    let res: Response;
+    try {
+      res = await fetch(url, { signal: ctrl.signal });
+    } finally {
+      clearTimeout(timer);
+    }
     if (!res.ok) return null;
     const data = (await res.json()) as {
       current?: { time?: string; temperature_2m?: number; weather_code?: number; is_day?: number };

@@ -114,9 +114,13 @@ export class Player {
    * resume() may resolve long after a newer attempt took over.
    */
   private async setupRoute(want: boolean, token: number): Promise<void> {
-    if (want && !this.sourceNode && "AudioContext" in window) {
+    if (want && "AudioContext" in window) {
       if (!this.actx) this.actx = new AudioContext();
-      if (this.actx.state === "suspended") {
+      // Whether or not the graph is already wired, a suspended or
+      // interrupted context (iOS Safari bounces to "interrupted" after
+      // leaving the page) silences it — recovery is attempted every time,
+      // not only when sourceNode is missing.
+      if (this.actx.state !== "running") {
         try {
           // Without user activation resume() can stay pending forever —
           // bound the wait, then decide from the resulting state.
@@ -130,22 +134,28 @@ export class Player {
       }
       if (token !== this.attempt) return;
       if (this.actx.state === "running") {
-        try {
-          this.sourceNode = this.actx.createMediaElementSource(this.audio);
-        } catch {
-          return; // already sourced — fall through to direct playback
+        if (!this.sourceNode) {
+          try {
+            this.sourceNode = this.actx.createMediaElementSource(this.audio);
+          } catch {
+            /* already sourced — fall through to reporting */
+          }
         }
-        this.analyser = this.actx.createAnalyser();
-        this.analyser.fftSize = 1024;
-        this.analyser.smoothingTimeConstant = 0.72;
-        this.waveBuf = new Float32Array(this.analyser.fftSize);
-        this.sourceNode.connect(this.analyser).connect(this.actx.destination);
-        this.onMeter(true);
+        if (this.sourceNode && !this.analyser) {
+          this.analyser = this.actx.createAnalyser();
+          this.analyser.fftSize = 1024;
+          this.analyser.smoothingTimeConstant = 0.72;
+          this.waveBuf = new Float32Array(this.analyser.fftSize);
+          this.sourceNode.connect(this.analyser).connect(this.actx.destination);
+        }
+        // Replays must re-report: App resets metered=false on each tune,
+        // and a reused graph would otherwise silently claim unmetered.
+        if (this.analyser) this.onMeter(true);
       } else {
         // The context needs a real user activation (the bore completes on
         // an animation frame, not a gesture). The stream was fetched with
-        // CORS — it survives a late wiring — so arm a one-shot retry on
-        // the next pointer or key press instead of staying flat forever.
+        // CORS — it survives a late wiring — so arm a retry on the next
+        // activation-capable event instead of staying flat forever.
         this.armGestureWire();
       }
     }
@@ -155,46 +165,59 @@ export class Player {
     }
   }
 
+  private wireEvents = ["pointerdown", "pointerup", "keydown", "click"] as const;
+
   private armGestureWire() {
     if (this.wireOnGesture) return;
     const retry = async () => {
-      this.wireOnGesture = null;
-      if (this.actx?.state === "suspended") {
-        // Inside the activation the resume() actually resolves — but
-        // `state` only flips after the promise, so await it.
+      // Strip EVERY registration first — each event type holds its own
+      // listener, and clearing the shared ref before removing them would
+      // strand the siblings.
+      this.disarmGestureWire();
+      const actx = this.actx;
+      if (actx && actx.state !== "running") {
+        // Inside the activation resume() resolves — but `state` only
+        // flips after the promise, and the promise itself may never
+        // settle, so bound the await.
         try {
-          await this.actx.resume();
+          await Promise.race([actx.resume(), new Promise((r) => setTimeout(r, 400))]);
         } catch {
           /* stays suspended */
         }
       }
-      if (this.wantGraph && !this.sourceNode && this.actx?.state === "running") {
+      if (this.wantGraph && this.actx?.state === "running") {
         try {
-          this.sourceNode = this.actx.createMediaElementSource(this.audio);
-          this.analyser = this.actx.createAnalyser();
-          this.analyser.fftSize = 1024;
-          this.analyser.smoothingTimeConstant = 0.72;
-          this.waveBuf = new Float32Array(this.analyser.fftSize);
-          this.sourceNode.connect(this.analyser).connect(this.actx.destination);
-          this.onMeter(true);
+          if (!this.sourceNode) {
+            this.sourceNode = this.actx.createMediaElementSource(this.audio);
+          }
+          if (!this.analyser) {
+            this.analyser = this.actx.createAnalyser();
+            this.analyser.fftSize = 1024;
+            this.analyser.smoothingTimeConstant = 0.72;
+            this.waveBuf = new Float32Array(this.analyser.fftSize);
+            this.sourceNode.connect(this.analyser).connect(this.actx.destination);
+          }
+          if (this.analyser) this.onMeter(true);
         } catch {
           /* element already sourced elsewhere — stay direct */
         }
       }
-      // Still suspended (a non-activation event fired) — re-arm.
-      if (this.wantGraph && !this.sourceNode && this.actx && this.actx.state !== "running") {
+      // Still unmetered (a non-activation event fired, or the resume
+      // timed out) — re-arm and wait for the next gesture.
+      if (this.wantGraph && (!this.analyser || this.actx?.state !== "running")) {
         this.armGestureWire();
       }
     };
     this.wireOnGesture = retry;
-    window.addEventListener("pointerdown", retry, { once: true });
-    window.addEventListener("keydown", retry, { once: true });
+    // pointerdown activates for mouse/pen only; touch earns activation on
+    // release — listen on all of them, drop the whole set on first fire.
+    for (const ev of this.wireEvents) window.addEventListener(ev, retry);
   }
 
   private disarmGestureWire() {
-    if (!this.wireOnGesture) return;
-    window.removeEventListener("pointerdown", this.wireOnGesture);
-    window.removeEventListener("keydown", this.wireOnGesture);
+    const fn = this.wireOnGesture;
+    if (!fn) return;
+    for (const ev of this.wireEvents) window.removeEventListener(ev, fn);
     this.wireOnGesture = null;
   }
 
@@ -282,8 +305,10 @@ export class Player {
     this.set("connecting");
     this.armStall();
     // A real activation (the Listen press) — retry the graph now, since
-    // the bore-time attempt may have found the context suspended.
-    if (this.wantGraph && !this.sourceNode) void this.setupRoute(true, token);
+    // the bore-time attempt may have found the context suspended. The
+    // context itself may also need resuming independently of the graph
+    // (interrupted while away), which setupRoute handles either way.
+    if (this.wantGraph) void this.setupRoute(true, token);
     this.audio.play().catch((e) => {
       if (token === this.attempt && this.live) this.set(this.fail(e));
     });

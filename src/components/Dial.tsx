@@ -15,8 +15,9 @@ const PAD = 14; // px inside the track
 
 /**
  * The signal band: a horizontal tuner with one detent per candidate station.
- * Drag the needle, flick it, click a detent, or use arrow keys. The needle is
- * a damped spring — it glides, overshoots a hair, and settles like a real
+ * Drag the needle — detents are magnetic and click as you cross them — or
+ * step with arrow keys. Release selects the nearest detent; the needle is a
+ * damped spring that glides, overshoots a hair, and settles like a real
  * tuner. Noise speckle density follows needle speed.
  */
 export function Dial({ count, index, sweeping, live, onSelect, onMove, onLock, label }: Props) {
@@ -41,6 +42,7 @@ export function Dial({ count, index, sweeping, live, onSelect, onMove, onLock, l
     magIx: -1, // detent the needle is magnetically snapped to while dragging
     pid: null as number | null, // the one pointer owning the drag
     clickBurst: 0, // staggered detent clicks queued this gesture
+    burstT: [] as number[], // their timer ids — cleared on cancel/unmount
     lastT: 0, // frame clock for dt-normalized physics
     live,
   });
@@ -231,6 +233,8 @@ export function Dial({ count, index, sweeping, live, onSelect, onMove, onLock, l
       cancelAnimationFrame(st.current.raf);
       st.current.raf = 0; // a cancelled id must not look "running" to kick()
       ro.disconnect();
+      for (const t of st.current.burstT) window.clearTimeout(t);
+      st.current.burstT = [];
     };
   }, []);
 
@@ -278,7 +282,12 @@ export function Dial({ count, index, sweeping, live, onSelect, onMove, onLock, l
       const dx = detentX(i, s.w);
       if (dx > lo && dx <= hi && i !== s.magIx && s.clickBurst < 5) {
         const delay = s.clickBurst++ * 40;
-        setTimeout(() => onLock?.(), delay);
+        s.burstT.push(
+          window.setTimeout(() => {
+            s.burstT.shift();
+            if (s.dragging) onLock?.();
+          }, delay),
+        );
       }
     }
     s.lastX = x;
@@ -304,6 +313,8 @@ export function Dial({ count, index, sweeping, live, onSelect, onMove, onLock, l
     s.pid = null;
     s.magIx = -1;
     s.clickBurst = 0;
+    for (const t of s.burstT) window.clearTimeout(t);
+    s.burstT = [];
     kick();
   };
   const onKeyDown = (e: React.KeyboardEvent) => {

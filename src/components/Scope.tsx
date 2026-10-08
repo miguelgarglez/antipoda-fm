@@ -23,11 +23,12 @@ export function Scope({ player, active, connecting, metered = false, className }
   useEffect(() => {
     const canvas = ref.current!;
     const ctx = canvas.getContext("2d")!;
-    const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const rmq = window.matchMedia("(prefers-reduced-motion: reduce)");
     let raf = 0;
     let last = 0;
 
     const draw = (now: number) => {
+      const reduced = rmq.matches; // live read — the pref can flip mid-session
       const dt = last ? (now - last) / 1000 : 0;
       last = now;
       const w = canvas.getBoundingClientRect().width;

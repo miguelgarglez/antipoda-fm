@@ -34,19 +34,20 @@ async function rbGet<T>(path: string): Promise<T> {
   let lastErr: unknown = null;
   for (let i = 0; i < MIRRORS.length; i++) {
     const base = MIRRORS[(start + i) % MIRRORS.length];
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 9000);
     try {
-      const ctrl = new AbortController();
-      const timer = setTimeout(() => ctrl.abort(), 9000);
       const res = await fetch(`${base}${path}`, {
         signal: ctrl.signal,
         headers: { "User-Agent": "antipoda-fm/0.1" },
       });
       const body = (await res.json()) as T;
-      clearTimeout(timer);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       return body;
     } catch (e) {
       lastErr = e;
+    } finally {
+      clearTimeout(timer);
     }
   }
   throw lastErr;

@@ -22,17 +22,18 @@ Ocean antipodes, countries with no stations, dead streams, autoplay blocks — e
 
 ## The instrument
 
-- **The dial** is a physical tuner — one detent per candidate station. Drag it (detents are magnetic and click as you cross them), flick it, or step with arrow keys. The needle stays warm while connecting and turns phosphor only when audio is actually playing.
-- **The scope** draws the real waveform when the stream's CORS policy allows a WebAudio analyser, and honestly says so when it can't — an invented waveform would be a lie.
-- **Green is earned**: nothing turns phosphor until sound leaves the speaker.
-- On phones the transport pins to the bottom edge with 44px targets; `prefers-reduced-motion` swaps the bore for a direct cut and stills the loops.
+- **The dial** is a physical tuner — one detent per candidate station. Drag it (detents are magnetic and click as you cross them) or step with arrow keys; release selects the nearest detent. The needle stays warm while connecting and turns phosphor only once the stream reports playing.
+- **The scope** draws the real waveform when the stream's CORS policy allows a WebAudio analyser. When it can't, it draws a generated carrier — a slow breathing trace with a sweeping pulse — and says so plainly. An invented waveform dressed as the real one would be a lie.
+- **Green is earned**: nothing turns phosphor until the media element reports `playing` — a paused or still-connecting station stays orange.
+- On phones the transport pins to the bottom edge with 44px targets; `prefers-reduced-motion` stills every animation loop and snaps the camera — the cutaway simply appears complete instead of flying through.
 
 ## How it works
 
 Everything is client-side. No API keys, no backend, no tracking.
 
 - **The antipode** is pure math: `lat' = -lat`, `lon' = lon + 180` normalized into `[-180, 180]`.
-- **The globe** is a `<canvas>` orthographic projection. Coastlines come from bundled Natural Earth 110m polygons, converted to 3D unit vectors once and clipped per frame against the visible hemisphere. The bore sequence runs on a fixed wall-clock timeline — the trip never inherits network speed; a slow resolver just means the probe rests longer at the far rim.
+- **The globe** is a `<canvas>` orthographic projection driven by a quaternion camera — drag it like a physical body (velocity-tracked fling, exponential damping), pinch or scroll to zoom, or steer it with arrow keys. Coastlines come from bundled Natural Earth 110m polygons, converted to 3D unit vectors once and clipped per frame against the visible hemisphere. Tuning runs a scripted flight — origin, bore, antipode — on a fixed wall-clock timeline, so the trip never inherits network speed; a slow resolver just means the probe rests longer at the far rim.
+- **The first-run guide** teaches by doing — grab the planet, name a place, drag the dial — three tips that wait for you to try each thing, skip themselves politely, and never come back unless asked (replay via `?`).
 - **Country lookup** unwraps every polygon ring at load (longitudes adjusted ±360 to stay continuous), so point-in-polygon survives the antimeridian — Russia and Fiji don't break it. The Antarctic polar cap is contained explicitly because the dataset truncates near 84°S.
 - **The resolver** uses Radio Browser's real proximity search (`geo_lat`, `geo_long`, `geo_distance`, `order=geo_distance`) with widening radii, then tops up from the containing or nearest country's stations. Stations report coordinates, so the distances shown are measured, not claimed. The far-side weather and clock come from Open-Meteo.
 - **The player** wraps one `<audio>` element with attempt tokens — a stale promise or a dead stream's late error can never overwrite a newer station. HLS playlists route through `hls.js` (lazy-loaded) unless the browser plays them natively. A CORS probe decides per-URL whether the stream can feed the analyser; when it can't, playback goes direct and the meter admits it's showing carrier only. Autoplay denial lands you on a paused card with a Listen button, not an error.

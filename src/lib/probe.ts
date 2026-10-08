@@ -17,20 +17,29 @@ export function probeCors(url: string): Promise<boolean> {
   const hit = cache.get(url);
   if (hit) return hit;
   const p = (async () => {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 3000);
     try {
-      const ctrl = new AbortController();
-      const timer = setTimeout(() => ctrl.abort(), 3000);
       const res = await fetch(url, {
         signal: ctrl.signal,
         headers: { Range: "bytes=0-0" },
       });
-      ctrl.abort();
-      clearTimeout(timer);
       return res.ok || res.status === 206;
     } catch {
       return false;
+    } finally {
+      // Abort quietly and drop the timer however the fetch ended —
+      // failures previously left the 3s callback armed on dead entries.
+      ctrl.abort();
+      clearTimeout(timer);
     }
   })();
+  // Bound the cache — a session of retuning across mounts would grow it
+  // forever; oldest-first eviction is enough for a per-URL verdict.
+  if (cache.size > 300) {
+    const oldest = cache.keys().next().value;
+    if (oldest !== undefined) cache.delete(oldest);
+  }
   cache.set(url, p);
   return p;
 }
