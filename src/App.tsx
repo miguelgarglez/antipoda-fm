@@ -626,8 +626,10 @@ export default function App() {
           {phase === "tuning" && (
             <div className="tuning">
               <ul className="log">
-                {log.map((l, i) => (
-                  <li key={i} className={i === log.length - 1 ? "cur" : ""}>
+                {/* One beat at a time: the previous line stays as memory,
+                    the current line owns the readout. */}
+                {log.slice(-2).map((l, i, arr) => (
+                  <li key={`${log.length - arr.length + i}-${l}`} className={i === arr.length - 1 ? "cur" : ""}>
                     {l}
                   </li>
                 ))}
@@ -874,7 +876,9 @@ export default function App() {
             open-meteo
           </p>
         </details>
-        <span className="foot-hint">arrows or drag tune the dial</span>
+        <span className="foot-hint">
+          {phase === "idle" ? "drag the planet" : "arrows or drag tune the dial"}
+        </span>
       </footer>
     </div>
   );

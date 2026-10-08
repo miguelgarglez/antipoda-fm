@@ -845,6 +845,19 @@ input:focus-visible,
     flex-direction: column;
     transition: width 320ms var(--ease-in-out);
   }
+  /* The utilities get their own strip above the window instead of
+     floating over the planet — a header row, not an overlay. */
+  .stage-ctl {
+    position: static;
+    order: -3;
+    justify-content: flex-end;
+    padding-bottom: 2px;
+  }
+  .stage-tag {
+    position: static;
+    order: -2;
+    padding: 2px 2px 4px;
+  }
   .stage .globe {
     width: 100%;
     height: 200px;
@@ -1155,14 +1168,14 @@ input:focus-visible,
   position: fixed;
   transform: translateX(-50%);
   font-family: var(--mono);
-  font-size: 10px;
-  letter-spacing: 0.22em;
+  font-size: 11px;
+  letter-spacing: 0.18em;
   text-transform: uppercase;
-  color: rgba(242, 238, 227, 0.66);
-  background: rgba(10, 11, 16, 0.72);
-  border: 1px solid rgba(242, 238, 227, 0.14);
+  color: rgba(242, 238, 227, 0.82);
+  background: rgba(10, 11, 16, 0.78);
+  border: 1px solid rgba(242, 238, 227, 0.2);
   border-radius: 999px;
-  padding: 6px 12px;
+  padding: 7px 13px;
   pointer-events: none;
   animation: tip-in 420ms var(--ease-out) backwards;
 }
