@@ -37,10 +37,18 @@ type Step = {
   inline?: boolean;
 };
 
+const coarse =
+  typeof window !== "undefined" &&
+  window.matchMedia("(pointer: coarse)").matches;
+
 const STEPS: Step[] = [
   {
-    sel: ".stage",
-    text: "The planet is a body — drag to turn, scroll to approach.",
+    // The arcs must hug the planet's window — the .stage box now carries
+    // a header strip and captions, so measuring it rings empty air.
+    sel: "canvas.globe",
+    text: coarse
+      ? "The planet is a body — drag to turn, pinch to zoom."
+      : "The planet is a body — drag to turn, scroll to approach.",
     timeout: 12000,
     onlyPhase: "idle",
     inside: true, // below the stage sits its own caption; above it is header

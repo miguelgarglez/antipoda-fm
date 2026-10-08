@@ -67,6 +67,12 @@ body {
   -webkit-backdrop-filter: blur(6px);
 }
 
+/* display:contents keeps tag/ctl as stage children on desktop, so their
+   absolute positions still resolve against the stage window. */
+.stage-head {
+  display: contents;
+}
+
 .snd {
   font-family: var(--mono);
   font-size: 10px;
@@ -434,6 +440,11 @@ input:focus-visible,
   }
 }
 
+.place-link:active {
+  color: var(--signal);
+  border-bottom-color: var(--signal);
+}
+
 .note {
   font-family: var(--mono);
   font-size: 11.5px;
@@ -727,6 +738,14 @@ input:focus-visible,
   }
 }
 
+/* Every pressable answers the press itself — a tap should land in under
+   100ms even when the pointer never hovers. */
+.icon-btn:active {
+  color: var(--bone);
+  border-color: rgba(242, 238, 227, 0.6);
+  transform: scale(0.94);
+}
+
 .link-btn {
   margin-left: auto;
   font-family: var(--mono);
@@ -748,6 +767,11 @@ input:focus-visible,
     color: var(--bone);
     border-bottom-color: var(--bone);
   }
+}
+
+.link-btn:active {
+  color: var(--bone);
+  border-bottom-color: var(--bone);
 }
 
 .failed h2 {
@@ -845,18 +869,20 @@ input:focus-visible,
     flex-direction: column;
     transition: width 320ms var(--ease-in-out);
   }
-  /* The utilities get their own strip above the window instead of
-     floating over the planet — a header row, not an overlay. */
+  /* The utilities and the nameplate share one row above the window
+     instead of floating over the planet — a header, not an overlay. */
+  .stage-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    order: -3;
+    padding: 2px 2px 8px;
+  }
   .stage-ctl {
     position: static;
-    order: -3;
-    justify-content: flex-end;
-    padding-bottom: 2px;
   }
   .stage-tag {
     position: static;
-    order: -2;
-    padding: 2px 2px 4px;
   }
   .stage .globe {
     width: 100%;
@@ -1151,6 +1177,10 @@ input:focus-visible,
   }
 }
 
+.guide-skip:active {
+  color: var(--bone);
+}
+
 .guide-skip-floating {
   position: fixed;
   bottom: 18px;
@@ -1241,6 +1271,14 @@ input:focus-visible,
   color: rgba(242, 238, 227, 0.85);
 }
 
+@media (max-width: 960px) {
+  /* Lesson copy is the instruction, not ornament — it gets the 12px
+     floor the reviewer asked for. */
+  .guide-row p {
+    font-size: 12px;
+  }
+}
+
 .guide-row .guide-skip {
   margin-top: 0;
   flex: none;
@@ -1281,8 +1319,13 @@ input:focus-visible,
   .guide-ring,
   .guide-arc-path,
   .guide-arc-chev,
-  .guide-tip {
+  .guide-tip,
+  .guide-row-dot {
     animation: none;
+  }
+  .guide-row,
+  .guide-mini {
+    animation-duration: 1ms;
   }
   .tuning .log li,
   .card,

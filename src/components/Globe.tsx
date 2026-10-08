@@ -38,6 +38,8 @@ type Props = {
   armed: boolean;
   /** Fired once when the probe exits the far surface. */
   onBoreComplete?: () => void;
+  /** Fired once when the probe has crossed but the resolver is still out. */
+  onWaiting?: () => void;
   /** Fired on a real gesture — a drag that moved the body, a zoom, a key turn. */
   onInteract?: () => void;
   className?: string;
@@ -135,7 +137,7 @@ function qAxisUp(axis: Vec3, facingHint: Vec3): Quat {
 
 type Shot = { at: number; dur: number; q1: Quat; z1: number };
 
-export function Globe({ axis, origin, antipode, locked, boring, armed, onBoreComplete, onInteract, className }: Props) {
+export function Globe({ axis, origin, antipode, locked, boring, armed, onBoreComplete, onWaiting, onInteract, className }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const state = useRef({
     q: HOME_Q as Quat,
@@ -161,6 +163,7 @@ export function Globe({ axis, origin, antipode, locked, boring, armed, onBoreCom
     pauseT: 0, // grab start — the bore clock freezes while held
     reaimUntil: 0, // release re-aim deadline — the clock stays frozen till then
     exitAt: 0, // probe exit flash timestamp
+    waitingNotified: false, // "crossed but resolver still out" told the app once
     dragAcc: 0, // accumulated px this gesture — guide listens for real drags
     pulseAt: 0, // lock timestamp — one chord pulse per lock transition
     lastT: 0,
@@ -173,6 +176,7 @@ export function Globe({ axis, origin, antipode, locked, boring, armed, onBoreCom
     origin,
     antipode,
     onBoreComplete,
+    onWaiting,
     onInteract,
   });
   const s = state.current;
@@ -183,6 +187,7 @@ export function Globe({ axis, origin, antipode, locked, boring, armed, onBoreCom
   s.origin = origin;
   s.antipode = antipode;
   s.onBoreComplete = onBoreComplete;
+  s.onWaiting = onWaiting;
   s.onInteract = onInteract;
 
   const queueShots = (shots: Shot[]) => {
@@ -215,14 +220,20 @@ export function Globe({ axis, origin, antipode, locked, boring, armed, onBoreCom
       s.holdStart = 0;
       s.exitAt = 0;
       s.pulseAt = 0;
+      s.waitingNotified = false;
       s.boreStart = now + (reduced ? 0 : PRE_BORE);
       if (s.probeT < 0 || reaim) s.probeT = 0;
       if (!reduced) {
+        // The dive stops inside the stage: R = 0.4·size·z, so z past
+        // ~1.25 shears the planet against the canvas edges. Small canvases
+        // dive shallower — the bore counter needs its strip below the rim.
+        const cnv = canvasRef.current;
+        const short = cnv
+          ? Math.min(cnv.clientWidth, cnv.clientHeight)
+          : 9999;
+        const zDive = short < 400 ? 1.1 : 1.2;
         queueShots([
-          // The dive stops inside the stage: R = 0.4·size·z, so z past
-          // ~1.25 shears the planet against the canvas edges. 1.2 fills
-          // 96% of the window — a push-in, not a crop.
-          { at: now, dur: SHOT_MS.toOrigin, q1: qLookAt(s.axis, NORTH), z1: 1.2 },
+          { at: now, dur: SHOT_MS.toOrigin, q1: qLookAt(s.axis, NORTH), z1: zDive },
           {
             at: now + SHOT_MS.toOrigin + SHOT_MS.settle,
             dur: SHOT_MS.toChord,
@@ -644,6 +655,10 @@ export function Globe({ axis, origin, antipode, locked, boring, armed, onBoreCom
             if (pt >= 1) {
               s.probeT = 1;
               if (!s.exitAt) s.exitAt = nowEff; // bone-white exit flare
+              if (!s.armed && !s.waitingNotified) {
+                s.waitingNotified = true;
+                s.onWaiting?.();
+              }
             }
             // Rest at the far rim until the resolver answers.
             if (pt >= 1 && s.armed) {

@@ -175,6 +175,12 @@ export default function App() {
     };
   }, [onPlayerState]);
 
+  // The probe rests at the far rim while the resolver is still out — the
+  // readout must own that wait instead of claiming it is still piercing.
+  const onProbeWaiting = useCallback(() => {
+    pushLog("through — waiting on the far side…");
+  }, []);
+
   const onBoreComplete = useCallback(() => {
     setBoreDone(true);
     const n = candidatesRef.current.length;
@@ -483,11 +489,13 @@ export default function App() {
             boring={boring}
             armed={armed}
             onBoreComplete={onBoreComplete}
+            onWaiting={onProbeWaiting}
             onInteract={() => setGlobeTouched(true)}
           />
-          <span className="stage-tag">antípoda.fm</span>
           <span className="stage-sub">the broadcast from underneath you</span>
-          <div className="stage-ctl">
+          <div className="stage-head">
+            <span className="stage-tag">antípoda.fm</span>
+            <div className="stage-ctl">
             <button
               className={`snd ${snd ? "on" : ""}`}
               onClick={() => {
@@ -515,6 +523,7 @@ export default function App() {
             >
               ?
             </button>
+            </div>
           </div>
           {phase !== "idle" && (
             <div className="dial-caption" aria-hidden="true">
