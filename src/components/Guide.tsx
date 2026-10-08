@@ -207,6 +207,13 @@ export function Guide({ phase, globeTouched, dialTouched, onDone }: Props) {
         : below;
 
   const slot = step.inline ? document.querySelector(".dial-lesson-slot") : null;
+  // Small screens: the opening lesson flows between the planet and the
+  // headline — a floating tip would cover one or the other.
+  const introSlot =
+    ix === 0 && vw <= 720 && !step.inline
+      ? document.querySelector(".guide-intro-slot")
+      : null;
+  const rowSlot = slot || introSlot;
 
   return (
     <div className={`guide${fading ? " fading" : ""}`}>
@@ -225,7 +232,7 @@ export function Guide({ phase, globeTouched, dialTouched, onDone }: Props) {
           />
         )
       )}
-      {rect && slot ? (
+      {rect && rowSlot ? (
         createPortal(
           <div className={`guide-row${fading ? " fading" : ""}`} role="status">
             <span className="guide-row-dot" aria-hidden="true" />
@@ -234,7 +241,7 @@ export function Guide({ phase, globeTouched, dialTouched, onDone }: Props) {
               skip
             </button>
           </div>,
-          slot,
+          rowSlot,
         )
       ) : (
         rect && (

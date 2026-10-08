@@ -159,6 +159,7 @@ export function Globe({ axis, origin, antipode, locked, boring, armed, onBoreCom
     hadMarkers: false,
     boreAxis: null as Vec3 | null, // the axis the queued shots were aimed at
     pauseT: 0, // grab start — the bore clock freezes while held
+    reaimUntil: 0, // release re-aim deadline — the clock stays frozen till then
     exitAt: 0, // probe exit flash timestamp
     dragAcc: 0, // accumulated px this gesture — guide listens for real drags
     pulseAt: 0, // lock timestamp — one chord pulse per lock transition
@@ -378,31 +379,34 @@ export function Globe({ axis, origin, antipode, locked, boring, armed, onBoreCom
     };
     const releasePause = (s: (typeof state)["current"], at: number) => {
       if (!s.pauseT) return;
-      const held = at - s.pauseT;
-      s.pauseT = 0;
       // A real drag knocked the camera off its aim — re-orient to the
-      // chord view first; the bore clock waits out the 220ms re-aim too,
-      // so the probe never resumes into a misaligned cutaway.
-      const REAIM = 220;
+      // chord view first. The bore clock stays FROZEN through the re-aim
+      // (pauseT still marks the grab instant, so rendered progress is
+      // exactly where the hand left it); the draw loop applies the full
+      // offset when the camera settles. Shifting boreStart now would
+      // rewind the probe instead of holding it.
       const reaimAxis =
         s.dragAcc > 8 && s.boring && !s.boreDone ? s.boreAxis : null;
-      const shift = held + (reaimAxis ? REAIM : 0);
-      s.boreStart += shift;
-      if (s.resealStart) s.resealStart += shift;
-      if (s.holdStart) s.holdStart += shift;
-      if (s.exitAt) s.exitAt += shift;
-      for (const f of s.flashes) f.at += shift / 1000;
       if (reaimAxis) {
+        s.reaimUntil = at + 220;
         s.shots = [
           {
             at: performance.now(),
-            dur: REAIM,
+            dur: 220,
             q1: qAxisUp(reaimAxis, qForward(s.q)),
             z1: s.zoomT,
           },
         ];
         s.shotFrom = null;
+        return;
       }
+      const held = at - s.pauseT;
+      s.pauseT = 0;
+      s.boreStart += held;
+      if (s.resealStart) s.resealStart += held;
+      if (s.holdStart) s.holdStart += held;
+      if (s.exitAt) s.exitAt += held;
+      for (const f of s.flashes) f.at += held / 1000;
     };
     const onUp = (e: PointerEvent) => {
       const s = state.current;
@@ -588,6 +592,23 @@ export function Globe({ axis, origin, antipode, locked, boring, armed, onBoreCom
             s.onBoreComplete?.();
           }
         } else {
+          // The re-aim expired: apply the whole held+reaim offset at once
+          // so the bore resumes from the exact progress the grab left.
+          // Skipped while a new grab still holds the planet.
+          if (
+            s.reaimUntil &&
+            now >= s.reaimUntil &&
+            s.pointers.size === 0
+          ) {
+            const shift = s.reaimUntil - s.pauseT;
+            s.boreStart += shift;
+            if (s.resealStart) s.resealStart += shift;
+            if (s.holdStart) s.holdStart += shift;
+            if (s.exitAt) s.exitAt += shift;
+            for (const f of s.flashes) f.at += shift / 1000;
+            s.pauseT = 0;
+            s.reaimUntil = 0;
+          }
           // One paused timestamp drives the whole sequence — travel,
           // hold, reseal and flashes all freeze while the planet is held.
           const nowEff = s.pauseT || now;
@@ -759,10 +780,16 @@ export function Globe({ axis, origin, antipode, locked, boring, armed, onBoreCom
         }
       }
 
-      // The opened planet.
+      // The opened planet. The cut face begins tilted toward the viewer
+      // and settles flat as the shell parts — an opening body needs a
+      // spatial cue, not just brighter concentric discs.
       if (morph > 0.02) {
         ctx.save();
         ctx.globalAlpha = morph;
+        const squash = 0.82 + 0.18 * easeInOut(clamp01(morph / 0.55));
+        ctx.translate(0, cy);
+        ctx.scale(1, squash);
+        ctx.translate(0, -cy);
         drawSection(ctx, cx, cy, R, {
           probe: s.boring ? s.probeT : -1,
           beamAlpha: 1,
@@ -898,6 +925,24 @@ export function Globe({ axis, origin, antipode, locked, boring, armed, onBoreCom
           ctx.beginPath();
           ctx.arc(p.x, p.y, 2.2, 0, Math.PI * 2);
           ctx.fillStyle = "rgba(255,77,0,0.55)";
+          ctx.fill();
+        }
+        // A pulse rides the diameter on a slow cycle — this is
+        // transmission through the body, not decoration.
+        const cyc = (now / 1000) % 3.8;
+        const ph = cyc / 1.6;
+        if (ph < 1) {
+          const k = easeInOut(ph);
+          const px = a0.x + (a1.x - a0.x) * k;
+          const py = a0.y + (a1.y - a0.y) * k;
+          ctx.globalAlpha = Math.sin(ph * Math.PI) * 0.9;
+          const g = ctx.createRadialGradient(px, py, 0, px, py, 7);
+          g.addColorStop(0, "rgba(255,240,222,0.95)");
+          g.addColorStop(0.4, "rgba(255,122,40,0.8)");
+          g.addColorStop(1, "rgba(255,77,0,0)");
+          ctx.beginPath();
+          ctx.arc(px, py, 7, 0, Math.PI * 2);
+          ctx.fillStyle = g;
           ctx.fill();
         }
         ctx.restore();

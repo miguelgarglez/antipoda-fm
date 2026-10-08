@@ -520,13 +520,16 @@ input:focus-visible,
 
 .station-name {
   position: relative;
-  font-size: clamp(1.6rem, 3vw, 2.3rem);
-  font-weight: 400;
-  font-style: italic;
-  line-height: 1.15;
-  margin: 12px 0 6px;
+  /* Radio identification, not editorial serif: the name is set like the
+     engraved label on a receiver's tuner glass. */
+  font-family: var(--mono);
+  font-size: clamp(1.15rem, 2vw, 1.5rem);
+  font-weight: 500;
+  letter-spacing: 0.03em;
+  line-height: 1.3;
+  margin: 14px 0 8px;
   /* Two lines reserved — a retune must never move the dial or scope. */
-  min-height: 2.3em;
+  min-height: 2.6em;
 }
 
 /* Retunes crossfade in place: the outgoing name dissolves over the
@@ -1141,10 +1144,21 @@ input:focus-visible,
   min-height: 0;
 }
 
-/* Once the lesson has lived here, the slot keeps its box — the dial
-   never moves mid-gesture because a hint left. */
+/* The opening lesson's in-flow home on small screens — hidden when
+   empty so it never becomes a stray grid cell on desktop. */
+.guide-intro-slot {
+  display: none;
+}
+.guide-intro-slot:not(:empty) {
+  display: block;
+  margin: 2px 0 10px;
+}
+
+/* Once the lesson has lived here, the slot keeps its ENTIRE box — the
+   populated margins included — so the dial never moves mid-gesture. */
 .dial-lesson-slot.held {
   min-height: 46px;
+  margin: -2px 0 8px;
 }
 
 .guide.fading,

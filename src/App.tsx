@@ -541,6 +541,10 @@ export default function App() {
           )}
         </section>
 
+        {/* On small screens the opening lesson lives here in flow —
+            between the planet and the headline, covering neither. */}
+        <div className="guide-intro-slot" />
+
         <section className="panel">
           {phase === "idle" && (
             <div className="intro">
