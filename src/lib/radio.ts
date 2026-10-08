@@ -91,21 +91,31 @@ function clean(list: Raw[]): Station[] {
 
 /**
  * Stations nearest a point, ordered by real distance. geo_distance is in
- * meters; the search returns geotagged stations only. The radius widens
- * until a few candidates exist or the dial is truly empty.
+ * meters and filters the candidate pool only — the API does not sort by
+ * it — so every page within the radius is fetched and distances are
+ * computed locally before truncating. The radius starts small so a real
+ * neighbour wins over a famous station a country away, and widens until
+ * a few candidates exist or the dial is truly empty.
  */
 async function nearStations(p: GeoPoint): Promise<Station[]> {
-  const radii = [1_000_000, 2_500_000, 6_000_000];
+  const radii = [50_000, 150_000, 500_000, 2_000_000, 6_000_000];
+  const PAGE = 200;
   let found: Station[] = [];
   let lastErr: unknown = null;
   let ok = false;
   for (const r of radii) {
     try {
-      const raw = await rbGet<Raw[]>(
-        `/json/stations/search?geo_lat=${p.lat}&geo_long=${p.lon}&geo_distance=${r}&order=geo_distance&limit=80&hidebroken=true`,
-      );
+      const raws: Raw[] = [];
+      for (let offset = 0; offset < 1000; offset += PAGE) {
+        const raw = await rbGet<Raw[]>(
+          `/json/stations/search?geo_lat=${p.lat}&geo_long=${p.lon}&geo_distance=${r}&limit=${PAGE}&offset=${offset}&hidebroken=true`,
+        );
+        raws.push(...raw);
+        if (raw.length < PAGE) break;
+      }
+      const list = clean(raws);
       ok = true;
-      const list = clean(raw)
+      const sorted = list
         .filter((s) => s.geoLat !== null && s.geoLong !== null)
         .sort(
           (a, b) =>
@@ -114,7 +124,7 @@ async function nearStations(p: GeoPoint): Promise<Station[]> {
         );
       // A wider radius should be a superset, but an empty reply must not
       // discard stations the smaller radius already found.
-      if (list.length > 0 || found.length === 0) found = list;
+      if (sorted.length > 0 || found.length === 0) found = sorted;
       if (found.length >= 4) break;
     } catch (e) {
       lastErr = e;
