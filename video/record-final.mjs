@@ -2,7 +2,10 @@ import { chromium } from "playwright";
 const b = await chromium.launch();
 const ctx = await b.newContext({
   viewport: { width: 1920, height: 1080 },
-  recordVideo: { dir: "raw/launch2", size: { width: 1920, height: 1080 } },
+  recordVideo: {
+    dir: new URL("./raw/launch2/", import.meta.url).pathname,
+    size: { width: 1920, height: 1080 },
+  },
 });
 const pg = await ctx.newPage();
 await pg.goto("http://localhost:5174/");
