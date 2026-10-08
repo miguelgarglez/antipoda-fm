@@ -201,7 +201,7 @@ export function Dial({ count, index, sweeping, live, onSelect, onMove, onLock, l
     }
 
     // Chrome text.
-    ctx.font = "9px 'IBM Plex Mono', monospace";
+    ctx.font = "10.5px 'IBM Plex Mono', monospace";
     ctx.textBaseline = "top";
     ctx.fillStyle = "rgba(152,161,184,0.85)";
     ctx.textAlign = "left";
@@ -319,13 +319,10 @@ export function Dial({ count, index, sweeping, live, onSelect, onMove, onLock, l
   };
   const onKeyDown = (e: React.KeyboardEvent) => {
     const s = st.current;
-    // Discrete keys move the needle at once — a keypress shouldn't trail
-    // the spring it triggered.
+    // Keys retune and let the spring carry the needle — a press glides
+    // to its detent instead of teleporting.
     const snap = (i: number) => {
-      if (s.w > 0) {
-        s.x = detentX(i, s.w);
-        s.v = 0;
-      }
+      if (s.w > 0) s.v = 0; // start the glide clean, no stale velocity
       onSelect(i);
     };
     if (e.key === "ArrowLeft" || e.key === "ArrowDown") {

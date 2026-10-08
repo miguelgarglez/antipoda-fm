@@ -493,7 +493,6 @@ export default function App() {
         <section
           className={`stage${boring ? " boring" : ""}${phase === "tuned" ? " on" : ""}`}
           aria-label="Earth"
-          onPointerDown={() => setGlobeTouched(true)}
         >
           <Globe
             className="globe"
@@ -504,6 +503,7 @@ export default function App() {
             boring={boring}
             armed={armed}
             onBoreComplete={onBoreComplete}
+            onInteract={() => setGlobeTouched(true)}
           />
           {phase !== "idle" && (
             <div className="dial-caption" aria-hidden="true">
@@ -591,13 +591,16 @@ export default function App() {
               )}
               {searchNote && <p className="note">{searchNote}</p>}
               {searching && <p className="note dim">looking…</p>}
-              <div className="quick">
-                {QUICK_PLACES.map((q) => (
-                  <button key={q} className="chip" onClick={() => quickPlace(q)}>
-                    {q}
-                  </button>
+              <p className="quick">
+                {QUICK_PLACES.map((q, i) => (
+                  <span key={q}>
+                    {i > 0 && <span className="quick-sep">·</span>}
+                    <button className="place-link" onClick={() => quickPlace(q)}>
+                      {q}
+                    </button>
+                  </span>
                 ))}
-              </div>
+              </p>
             </div>
           )}
 
@@ -724,17 +727,59 @@ export default function App() {
               <div className="controls">
                 <button
                   ref={playBtnRef}
-                  className="btn primary"
+                  className={`play-btn${playing ? " on" : ""}`}
                   disabled={connecting}
                   onClick={() => (playing ? player.current?.pause() : player.current?.resume())}
+                  aria-label={
+                    playing ? "Pause the broadcast" : connecting ? "Connecting" : "Listen"
+                  }
+                  title={playing ? "Pause" : "Listen"}
                 >
-                  {playing ? "Pause" : "Listen"}
+                  {playing ? (
+                    <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+                      <rect x="6" y="5" width="4" height="14" fill="currentColor" />
+                      <rect x="14" y="5" width="4" height="14" fill="currentColor" />
+                    </svg>
+                  ) : (
+                    <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+                      <path d="M8 5v14l11-7z" fill="currentColor" />
+                    </svg>
+                  )}
                 </button>
-                <button className="btn" onClick={copyLink}>
-                  {copied ? "Copied" : "Copy link"}
+                <button
+                  className="icon-btn"
+                  onClick={copyLink}
+                  aria-label={copied ? "Link copied" : "Copy a link to this signal"}
+                  title={copied ? "Copied" : "Copy link"}
+                >
+                  {copied ? (
+                    <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+                      <path
+                        d="M9 16.2L4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4z"
+                        fill="currentColor"
+                      />
+                    </svg>
+                  ) : (
+                    <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+                      <path
+                        d="M10.6 13.4a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="1.6"
+                        strokeLinecap="round"
+                      />
+                      <path
+                        d="M13.4 10.6a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="1.6"
+                        strokeLinecap="round"
+                      />
+                    </svg>
+                  )}
                 </button>
-                <button className="btn ghost" onClick={reset}>
-                  Elsewhere
+                <button className="link-btn" onClick={reset}>
+                  elsewhere
                 </button>
               </div>
               {lastSignalNote && (

@@ -30,15 +30,18 @@ type Step = {
   inside?: boolean;
   /** clear this sibling's bottom edge too when placing below the target */
   belowAfter?: string;
+  /** ring the planet with two curved marks on its limb, not a rectangle */
+  ring?: "rect" | "arc";
 };
 
 const STEPS: Step[] = [
   {
     sel: ".stage",
-    text: "The planet is a body. Grab it, spin it — scroll or pinch to zoom.",
+    text: "The planet is a body — drag to turn, scroll to approach.",
     timeout: 12000,
     onlyPhase: "idle",
     inside: true, // below the stage sits its own caption; above it is header
+    ring: "arc",
   },
   {
     sel: ".actions",
@@ -49,7 +52,7 @@ const STEPS: Step[] = [
   },
   {
     sel: ".dial",
-    text: "Every notch is a live signal near your antipode. Drag the needle.",
+    text: "Each notch is another station. Drag to listen.",
     timeout: 12000,
     onlyPhase: "tuned",
     above: true, // the transport row below the dial is the app's controls
@@ -78,6 +81,7 @@ export function Guide({ phase, globeTouched, dialTouched, onDone }: Props) {
     null,
   );
   const done = useRef(false);
+  const tipRef = useRef<HTMLDivElement>(null);
 
   const finish = () => {
     if (done.current) return;
@@ -146,7 +150,9 @@ export function Guide({ phase, globeTouched, dialTouched, onDone }: Props) {
   const vw = window.innerWidth;
   const vh = window.innerHeight;
   const tipW = Math.min(260, vw - 32);
-  const tipH = 118; // tip content height — measured generously
+  // Measure the real card height after mount — an estimate strands the
+  // flip logic when the copy wraps differently on narrow screens.
+  const tipH = tipRef.current?.getBoundingClientRect().height || 112;
   const tipX = rect ? clamp(rect.x + rect.w / 2 - tipW / 2, 12, vw - tipW - 12) : vw / 2 - tipW / 2;
   // Prefer below the target; flip above when the bottom edge is tight or
   // the step marks its underside as controls (the dial's transport row).
@@ -165,19 +171,28 @@ export function Guide({ phase, globeTouched, dialTouched, onDone }: Props) {
 
   return (
     <div className="guide">
-      {rect && (
-        <div
-          className="guide-ring"
-          style={{
-            left: rect.x - pad,
-            top: rect.y - pad,
-            width: rect.w + pad * 2,
-            height: rect.h + pad * 2,
-          }}
-        />
+      {rect && step.ring === "arc" ? (
+        <GuideArc rect={rect} />
+      ) : (
+        rect && (
+          <div
+            className="guide-ring"
+            style={{
+              left: rect.x - pad,
+              top: rect.y - pad,
+              width: rect.w + pad * 2,
+              height: rect.h + pad * 2,
+            }}
+          />
+        )
       )}
       {rect && (
-        <div className="guide-tip" style={{ left: tipX, top: tipY, width: tipW }} role="status">
+        <div
+          ref={tipRef}
+          className="guide-tip"
+          style={{ left: tipX, top: tipY, width: tipW }}
+          role="status"
+        >
           <span className="guide-step">step {ix + 1} of {STEPS.length}</span>
           <p>{step.text}</p>
           <button className="guide-skip" onClick={finish}>
@@ -195,3 +210,31 @@ export function Guide({ phase, globeTouched, dialTouched, onDone }: Props) {
 }
 
 const clamp = (x: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, x));
+
+/**
+ * Two curved marks on the planet's limb — a ring that belongs to a body,
+ * not a dashed rectangle around a UI region. The circle inscribed in the
+ * stage rect is the planet; the chevrons read as rotation.
+ */
+function GuideArc({ rect }: { rect: { x: number; y: number; w: number; h: number } }) {
+  const cx = rect.x + rect.w / 2;
+  const cy = rect.y + rect.h / 2;
+  const r = Math.min(rect.w, rect.h) / 2 - 3;
+  const arc = (a0: number, a1: number) => {
+    const p = (a: number) => `${cx + r * Math.cos(a)} ${cy + r * Math.sin(a)}`;
+    return `M ${p(a0)} A ${r} ${r} 0 0 1 ${p(a1)}`;
+  };
+  return (
+    <svg className="guide-arc" style={{ left: 0, top: 0 }}>
+      <path d={arc(-0.95, 0.45)} className="guide-arc-path" />
+      <path d={arc(Math.PI - 0.95, Math.PI + 0.45)} className="guide-arc-path" />
+      {/* chevrons on each limb point along the spin direction */}
+      <g transform={`translate(${cx}, ${cy - r - 2})`}>
+        <path d="M -6 3 L 0 -3 L 6 3" className="guide-arc-chev" />
+      </g>
+      <g transform={`translate(${cx}, ${cy + r + 2}) rotate(180)`}>
+        <path d="M -6 3 L 0 -3 L 6 3" className="guide-arc-chev" />
+      </g>
+    </svg>
+  );
+}

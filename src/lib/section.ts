@@ -29,9 +29,10 @@ export function drawSection(
     beamAlpha: number;
     flashes: { t: number; at: number }[]; // boundary-crossing pulses
     t: number; // seconds, for the molten breathe
+    exitFlash?: number; // 0..1 while the probe's exit flare burns, else -1
   },
 ) {
-  const { probe, beamAlpha, flashes, t } = opts;
+  const { probe, beamAlpha, flashes, t, exitFlash = -1 } = opts;
   const breathe = 1 + Math.sin(t * 1.4) * 0.012;
 
   // Mantle fill: dark warm gradient out to the rim.
@@ -54,11 +55,12 @@ export function drawSection(
   ctx.fillStyle = outer;
   ctx.fill();
 
-  // Inner core: the hot heart.
+  // Inner core: the hot heart — kept dim enough that the travelling probe
+  // is always the brightest thing on the plate.
   ctx.beginPath();
   ctx.arc(cx, cy, R * 0.192 * breathe, 0, Math.PI * 2);
   const inner = ctx.createRadialGradient(cx, cy, 0, cx, cy, R * 0.192 * breathe);
-  inner.addColorStop(0, "rgba(255,224,190,0.98)");
+  inner.addColorStop(0, "rgba(255,224,190,0.65)");
   inner.addColorStop(0.55, "rgba(255,96,20,0.85)");
   inner.addColorStop(1, "rgba(255,77,0,0.04)");
   ctx.fillStyle = inner;
@@ -72,7 +74,9 @@ export function drawSection(
   ctx.beginPath(); ctx.arc(cx, cy, R * 0.192, 0, Math.PI * 2); ctx.stroke();
 
   // Boundary-crossing flashes: a ring pulse at the crossed boundary.
+  // Entries with t<0 are chord pulses the caller draws itself.
   for (const f of flashes) {
+    if (f.t < 0) continue;
     const age = (t - f.at) / 0.7;
     if (age < 0 || age > 1) continue;
     ctx.beginPath();
@@ -127,6 +131,18 @@ export function drawSection(
     ctx.beginPath();
     ctx.arc(cx, py, 2.4, 0, Math.PI * 2);
     ctx.fillStyle = "#fff1e0";
+    ctx.fill();
+  }
+
+  // Exit flare: 120ms of bone-white light where the probe punches out.
+  if (exitFlash >= 0) {
+    const g = ctx.createRadialGradient(cx, cy + R, 0, cx, cy + R, 26);
+    const a = (1 - exitFlash) * 0.9;
+    g.addColorStop(0, `rgba(255,244,230,${a})`);
+    g.addColorStop(1, "rgba(255,244,230,0)");
+    ctx.beginPath();
+    ctx.arc(cx, cy + R, 26, 0, Math.PI * 2);
+    ctx.fillStyle = g;
     ctx.fill();
   }
 }

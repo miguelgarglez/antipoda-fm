@@ -300,6 +300,7 @@ body {
 
 button:focus-visible,
 input:focus-visible,
+.globe:focus-visible,
 .dial:focus-visible {
   outline: 2px solid var(--phosphor);
   outline-offset: 3px;
@@ -376,38 +377,40 @@ input:focus-visible,
   background: rgba(242, 238, 227, 0.08);
 }
 
+/* Starting points as a sentence of links, not a row of capsules — the
+   places belong to the copy, not to a control pattern. */
 .quick {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-top: 22px;
+  margin-top: 20px;
+  font-family: var(--mono);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  color: var(--slate-2);
+  line-height: 2.1;
 }
 
-.chip {
-  font-family: var(--mono);
-  font-size: 11px;
-  letter-spacing: 0.08em;
-  color: var(--slate-2);
-  background: transparent;
-  border: 1px solid rgba(90, 100, 120, 0.4);
-  border-radius: 999px;
-  padding: 6px 13px;
+.quick-sep {
+  margin: 0 9px;
+  color: rgba(90, 100, 120, 0.7);
+}
+
+.place-link {
+  font: inherit;
+  color: rgba(242, 238, 227, 0.85);
+  background: none;
+  border: 0;
+  border-bottom: 1px solid rgba(242, 238, 227, 0.3);
+  padding: 0 0 1px;
   cursor: pointer;
   transition:
     color 100ms ease,
-    border-color 100ms ease,
-    transform 80ms var(--ease-out);
+    border-color 100ms ease;
 }
 
 @media (hover: hover) and (pointer: fine) {
-  .chip:hover {
-    color: var(--bone);
-    border-color: rgba(242, 238, 227, 0.5);
+  .place-link:hover {
+    color: var(--signal);
+    border-bottom-color: var(--signal);
   }
-}
-
-.chip:active {
-  transform: scale(0.96);
 }
 
 .note {
@@ -616,9 +619,97 @@ input:focus-visible,
 .controls {
   display: flex;
   flex-wrap: wrap;
-  gap: 10px;
+  gap: 14px;
   margin-top: 20px;
   align-items: center;
+}
+
+/* The transport is one instrument: a round key for the broadcast, a
+   quiet icon to carry the signal away, and a text link for a new origin. */
+.play-btn {
+  width: 56px;
+  height: 56px;
+  flex: none;
+  border-radius: 50%;
+  border: 1.5px solid var(--signal);
+  background: transparent;
+  color: var(--signal);
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  transition:
+    background 140ms ease,
+    color 140ms ease,
+    transform 120ms var(--ease-out),
+    border-color 140ms ease;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .play-btn:hover:not(:disabled) {
+    background: rgba(255, 77, 0, 0.12);
+    transform: scale(1.06);
+  }
+}
+
+.play-btn:active:not(:disabled) {
+  transform: scale(0.94);
+}
+
+.play-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+/* While the broadcast runs, the ring fills — the key itself is on air. */
+.play-btn.on {
+  background: rgba(255, 77, 0, 0.14);
+  border-color: rgba(255, 122, 40, 0.9);
+}
+
+.icon-btn {
+  width: 42px;
+  height: 42px;
+  flex: none;
+  border-radius: 50%;
+  border: 1px solid rgba(242, 238, 227, 0.16);
+  background: none;
+  color: var(--slate-2);
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  transition:
+    color 120ms ease,
+    border-color 120ms ease;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .icon-btn:hover {
+    color: var(--bone);
+    border-color: rgba(242, 238, 227, 0.5);
+  }
+}
+
+.link-btn {
+  margin-left: auto;
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  color: var(--slate-2);
+  background: none;
+  border: 0;
+  border-bottom: 1px solid rgba(90, 100, 120, 0.5);
+  padding: 2px 0;
+  cursor: pointer;
+  transition:
+    color 120ms ease,
+    border-color 120ms ease;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .link-btn:hover {
+    color: var(--bone);
+    border-bottom-color: var(--bone);
+  }
 }
 
 .failed h2 {
@@ -686,10 +777,15 @@ input:focus-visible,
     height: 252px;
   }
   .stage.on {
-    width: min(66vw, 230px);
+    width: min(72vw, 260px);
   }
   .stage.on .globe {
-    height: 150px;
+    height: 210px;
+  }
+  /* A two-line reservation leaves dead space under one-line names —
+     on mobile the name takes only the room it needs. */
+  .station-name {
+    min-height: 0;
   }
   /* Captions live in the flow below the window — the destination is
      content, not chrome, and must survive the small canvas. */
@@ -721,14 +817,19 @@ input:focus-visible,
     position: static;
     padding-bottom: 4px;
   }
-  /* Thumb-sized targets for every mobile action, not just the transport. */
-  .chip {
-    min-height: 44px;
-    padding: 10px 16px;
+  /* Thumb-sized targets: inline links pad their tap area vertically
+     without leaving the text flow. */
+  .place-link {
+    padding: 10px 0 9px;
   }
   .snd {
     min-height: 44px;
     padding: 10px 16px;
+  }
+  /* The signal-path line duplicates what the bore itself just showed —
+     on the small card it yields its line. */
+  .bore-line {
+    display: none;
   }
   /* The meter explanation must be comfortably readable on a phone. */
   .scope-note {
@@ -776,16 +877,19 @@ input:focus-visible,
     padding: 14px 16px calc(12px + env(safe-area-inset-bottom));
     margin: 0;
   }
-  .controls .btn {
-    flex: 1;
-    min-height: 48px;
-    padding: 12px 6px;
-    font-size: 10.5px;
-    letter-spacing: 0.09em;
-    white-space: nowrap;
+  .controls .play-btn {
+    width: 52px;
+    height: 52px;
   }
-  .controls .btn.primary {
-    flex: 1.3;
+  .controls .icon-btn {
+    width: 46px;
+    height: 46px;
+  }
+  .controls .link-btn {
+    min-height: 46px;
+    display: inline-flex;
+    align-items: center;
+    border-bottom-color: transparent;
   }
   /* The pinned transport owns the bottom edge — the credits step aside. */
   .ph-tuned .foot {
@@ -873,6 +977,31 @@ input:focus-visible,
   border: 0;
   padding: 2px 0;
   cursor: pointer;
+  position: relative; /* ::after below widens the hit area to ~44px */
+}
+
+.guide-skip::after {
+  content: "";
+  position: absolute;
+  inset: -14px -12px;
+}
+
+.guide-arc {
+  position: fixed;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 30;
+}
+
+.guide-arc-path,
+.guide-arc-chev {
+  fill: none;
+  stroke: rgba(255, 77, 0, 0.85);
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  animation: guide-pulse 2.6s ease-in-out infinite;
 }
 
 @media (hover: hover) and (pointer: fine) {
@@ -897,6 +1026,8 @@ input:focus-visible,
   .tuning .log li.cur::after,
   .drag-hint,
   .guide-ring,
+  .guide-arc-path,
+  .guide-arc-chev,
   .guide-tip {
     animation: none;
   }
@@ -907,8 +1038,11 @@ input:focus-visible,
     animation-duration: 1ms;
   }
   .btn,
-  .chip,
   .snd,
+  .play-btn,
+  .icon-btn,
+  .link-btn,
+  .place-link,
   .stage,
   .stage .globe {
     transition: none;

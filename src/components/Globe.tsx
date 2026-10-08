@@ -34,6 +34,8 @@ type Props = {
   armed: boolean;
   /** Fired once when the probe exits the far surface. */
   onBoreComplete?: () => void;
+  /** Fired on a real gesture — a drag that moved the body, a zoom, a key turn. */
+  onInteract?: () => void;
   className?: string;
 };
 
@@ -47,7 +49,9 @@ const gvdbg =
   typeof window !== "undefined" &&
   new URLSearchParams(window.location.search).has("gvdbg");
 const ZOOM_MIN = 0.55;
-const ZOOM_MAX = 2.8;
+// User zoom stops before the rim leaves the stage — past ~1.15 the planet
+// reads as a square map window, not a body. Scripted shots may go closer.
+const ZOOM_USER_MAX = 1.15;
 
 // Boundary crossings as chord fractions -> boundary circle radius / R.
 const CROSSINGS = [BOUNDS.mantleCore, BOUNDS.outerInner, 1 - BOUNDS.outerInner, 1 - BOUNDS.mantleCore].map(
@@ -62,12 +66,12 @@ const BORE_T = {
   openAt: 180, // ms after boreStart — boreStart itself trails the shots
   openDur: 320,
   travelAt: 460,
-  travelDur: 920,
+  travelDur: 1500, // the crossing is the event — the prelude defers to it
   hold: 90,
   resealDur: 240,
 };
-// Camera prelude: fly-to-origin, then swing to the chord view.
-const SHOT_MS = { toOrigin: 640, toChord: 540, settle: 160 };
+// Camera prelude: fly-to-origin, pause a beat, swing to the chord view.
+const SHOT_MS = { toOrigin: 450, toChord: 450, settle: 80 };
 const PRE_BORE = SHOT_MS.toOrigin + SHOT_MS.toChord + SHOT_MS.settle;
 
 const easeInOut = (t: number) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
@@ -127,7 +131,7 @@ function qAxisUp(axis: Vec3, facingHint: Vec3): Quat {
 
 type Shot = { at: number; dur: number; q1: Quat; z1: number };
 
-export function Globe({ axis, origin, antipode, locked, boring, armed, onBoreComplete, className }: Props) {
+export function Globe({ axis, origin, antipode, locked, boring, armed, onBoreComplete, onInteract, className }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const state = useRef({
     q: HOME_Q as Quat,
@@ -150,6 +154,10 @@ export function Globe({ axis, origin, antipode, locked, boring, armed, onBoreCom
     crossed: new Set<number>(),
     hadMarkers: false,
     boreAxis: null as Vec3 | null, // the axis the queued shots were aimed at
+    pauseT: 0, // grab start — the bore clock freezes while held
+    exitAt: 0, // probe exit flash timestamp
+    dragAcc: 0, // accumulated px this gesture — guide listens for real drags
+    pulseSent: false, // one chord pulse per lock
     lastT: 0,
     dirty: true,
     requestDraw: () => {},
@@ -160,6 +168,7 @@ export function Globe({ axis, origin, antipode, locked, boring, armed, onBoreCom
     origin,
     antipode,
     onBoreComplete,
+    onInteract,
   });
   const s = state.current;
   s.boring = boring;
@@ -169,6 +178,7 @@ export function Globe({ axis, origin, antipode, locked, boring, armed, onBoreCom
   s.origin = origin;
   s.antipode = antipode;
   s.onBoreComplete = onBoreComplete;
+  s.onInteract = onInteract;
 
   const queueShots = (shots: Shot[]) => {
     s.shots = shots;
@@ -198,6 +208,8 @@ export function Globe({ axis, origin, antipode, locked, boring, armed, onBoreCom
       s.crossed.clear();
       s.resealing = false;
       s.holdStart = 0;
+      s.exitAt = 0;
+      s.pulseSent = false;
       s.boreStart = now + (reduced ? 0 : PRE_BORE);
       if (s.probeT < 0 || reaim) s.probeT = 0;
       if (!reduced) {
@@ -220,9 +232,13 @@ export function Globe({ axis, origin, antipode, locked, boring, armed, onBoreCom
       // back to the user.
       if (s.boreDone && s.antipode && !reduced) {
         const up = Math.abs(dot(s.antipode, NORTH)) > 0.93 ? [0, 1, 0] as Vec3 : NORTH;
+        // Aim ~17° off the antipode: dead-on flattens the defining chord
+        // into a dot — off-axis keeps the through-planet line legible.
+        const tiltAx = norm(cross(s.antipode, up));
+        const aim = qRot(qAxis(tiltAx, 0.3), s.antipode);
         queueShots([
-          { at: now + 120, dur: 1050, q1: qLookAt(s.antipode, up), z1: 1.5 },
-          { at: now + 120 + 1050 + 620, dur: 720, q1: qLookAt(s.antipode, up), z1: 1 },
+          { at: now + 120, dur: 1050, q1: qLookAt(aim, up), z1: 1.2 },
+          { at: now + 120 + 1050 + 620, dur: 720, q1: qLookAt(aim, up), z1: 1 },
         ]);
       }
     }
@@ -304,6 +320,7 @@ export function Globe({ axis, origin, antipode, locked, boring, armed, onBoreCom
         /* synthetic or already-dead pointer — track anyway */
       }
       s.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY, t: e.timeStamp });
+      s.dragAcc = 0;
       if (s.pointers.size === 2) {
         const [a, b] = [...s.pointers.values()];
         s.pinch0 = Math.hypot(a.x - b.x, a.y - b.y) || 1;
@@ -312,6 +329,9 @@ export function Globe({ axis, origin, antipode, locked, boring, armed, onBoreCom
       s.shots = []; // a grab interrupts the camera
       s.shotFrom = null;
       s.wvel = [0, 0, 0];
+      // A grab freezes the bore clock too — hand and event share one
+      // timeline, resumed on release by shifting boreStart forward.
+      if (s.boring && !s.boreDone && !s.pauseT) s.pauseT = e.timeStamp;
       canvas.style.cursor = "grabbing";
       s.dirty = true;
       s.requestDraw();
@@ -327,7 +347,8 @@ export function Globe({ axis, origin, antipode, locked, boring, armed, onBoreCom
       if (s.pointers.size === 2) {
         const [a, b] = [...s.pointers.values()];
         const d = Math.hypot(a.x - b.x, a.y - b.y) || 1;
-        s.zoomT = clamp(s.pinchZoom0 * (d / s.pinch0), ZOOM_MIN, ZOOM_MAX);
+        s.zoomT = clamp(s.pinchZoom0 * (d / s.pinch0), ZOOM_MIN, ZOOM_USER_MAX);
+        s.onInteract?.();
         s.dirty = true;
         s.requestDraw();
         return;
@@ -340,18 +361,35 @@ export function Globe({ axis, origin, antipode, locked, boring, armed, onBoreCom
       if (theta < 1e-5) return;
       const ax = norm([dy, dx, 0]);
       s.q = qNorm(qMul(qAxis(ax, theta), s.q));
-      // Track release inertia as an EMA of instantaneous angular speed.
+      // Release inertia is an EMA of instantaneous angular speed, weighted
+      // by real elapsed time — the same throw reads identically at 30Hz
+      // and 120Hz event rates.
       const inst = theta / (dtms / 1000);
-      s.wvel = add(scale(s.wvel, 0.65), scale(ax, inst * 0.35));
+      const alpha = 1 - Math.exp(-(dtms / 1000) / 0.04);
+      s.wvel = add(scale(s.wvel, 1 - alpha), scale(ax, inst * alpha));
+      s.dragAcc += Math.hypot(dx, dy);
+      if (s.dragAcc > 12) s.onInteract?.(); // a real turn, not a press
       s.dirty = true;
       s.requestDraw();
+    };
+    const releasePause = (s: (typeof state)["current"], at: number) => {
+      if (!s.pauseT) return;
+      const held = at - s.pauseT;
+      s.pauseT = 0;
+      s.boreStart += held;
+      if (s.resealStart) s.resealStart += held;
+      if (s.holdStart) s.holdStart += held;
+      for (const f of s.flashes) f.at += held / 1000;
     };
     const onUp = (e: PointerEvent) => {
       const s = state.current;
       const p = s.pointers.get(e.pointerId);
       s.pointers.delete(e.pointerId);
-      // A held-still release shouldn't fling — expire stale velocity.
-      if (p && e.timeStamp - p.t > 120) s.wvel = [0, 0, 0];
+      // A held-still release fades the stored velocity toward zero over
+      // ~80ms instead of cutting at a fixed age — 119ms and 121ms behave
+      // the same.
+      if (p) s.wvel = scale(s.wvel, Math.exp(-(e.timeStamp - p.t) / 80));
+      if (s.pointers.size === 0) releasePause(s, e.timeStamp);
       if (s.pointers.size === 2) {
         // A finger left a multi-touch pinch — rebase on the new pair or
         // the next move jumps zoom against the old pair's distance.
@@ -369,7 +407,10 @@ export function Globe({ axis, origin, antipode, locked, boring, armed, onBoreCom
       s.pointers.delete(e.pointerId);
       s.wvel = [0, 0, 0]; // a cancelled gesture never flings
       s.pinch0 = 0;
-      if (s.pointers.size === 0) canvas.style.cursor = "grab";
+      if (s.pointers.size === 0) {
+        releasePause(s, e.timeStamp);
+        canvas.style.cursor = "grab";
+      }
       s.dirty = true;
       s.requestDraw();
     };
@@ -377,44 +418,52 @@ export function Globe({ axis, origin, antipode, locked, boring, armed, onBoreCom
       e.preventDefault();
       const s = state.current;
       const k = e.deltaMode === 1 ? 0.05 : e.deltaMode === 2 ? 0.4 : 0.0016;
-      s.zoomT = clamp(s.zoomT * Math.exp(-e.deltaY * k), ZOOM_MIN, ZOOM_MAX);
+      s.zoomT = clamp(s.zoomT * Math.exp(-e.deltaY * k), ZOOM_MIN, ZOOM_USER_MAX);
       // A wheel gesture takes the camera back — cancel scripted moves.
       s.shots = [];
       s.shotFrom = null;
+      s.onInteract?.();
       s.dirty = true;
       s.requestDraw();
     };
     // Keyboard control of the same body: arrows rotate in the direction a
     // drag would move it, +/- zoom, 0 or Home returns to the home view.
+    // Rotations ride a short shot so a keypress eases rather than jumps.
     const onKey = (e: KeyboardEvent) => {
       const s = state.current;
       const step = 0.28; // ~16° per press
+      const rot = (ax: Vec3, deg: number) =>
+        qNorm(qMul(qAxis(ax, deg), s.q));
       let used = true;
       switch (e.key) {
         case "ArrowLeft":
-          s.q = qNorm(qMul(qAxis([0, 1, 0], -step), s.q));
+          s.shots = [{ at: e.timeStamp, dur: 120, q1: rot([0, 1, 0], -step), z1: s.zoomT }];
+          s.shotFrom = null;
           break;
         case "ArrowRight":
-          s.q = qNorm(qMul(qAxis([0, 1, 0], step), s.q));
+          s.shots = [{ at: e.timeStamp, dur: 120, q1: rot([0, 1, 0], step), z1: s.zoomT }];
+          s.shotFrom = null;
           break;
         case "ArrowUp":
-          s.q = qNorm(qMul(qAxis([1, 0, 0], -step), s.q));
+          s.shots = [{ at: e.timeStamp, dur: 120, q1: rot([1, 0, 0], -step), z1: s.zoomT }];
+          s.shotFrom = null;
           break;
         case "ArrowDown":
-          s.q = qNorm(qMul(qAxis([1, 0, 0], step), s.q));
+          s.shots = [{ at: e.timeStamp, dur: 120, q1: rot([1, 0, 0], step), z1: s.zoomT }];
+          s.shotFrom = null;
           break;
         case "+":
         case "=":
-          s.zoomT = clamp(s.zoomT * 1.18, ZOOM_MIN, ZOOM_MAX);
+          s.zoomT = clamp(s.zoomT * 1.18, ZOOM_MIN, ZOOM_USER_MAX);
           break;
         case "-":
         case "_":
-          s.zoomT = clamp(s.zoomT / 1.18, ZOOM_MIN, ZOOM_MAX);
+          s.zoomT = clamp(s.zoomT / 1.18, ZOOM_MIN, ZOOM_USER_MAX);
           break;
         case "0":
         case "Home":
-          s.q = HOME_Q;
-          s.zoomT = 1;
+          s.shots = [{ at: e.timeStamp, dur: 240, q1: HOME_Q, z1: 1 }];
+          s.shotFrom = null;
           s.wvel = [0, 0, 0];
           break;
         default:
@@ -422,8 +471,7 @@ export function Globe({ axis, origin, antipode, locked, boring, armed, onBoreCom
       }
       if (used) {
         e.preventDefault();
-        s.shots = []; // keyboard input takes the camera back too
-        s.shotFrom = null;
+        s.onInteract?.(); // keyboard rotation is a real lesson too
         s.dirty = true;
         s.requestDraw();
       }
@@ -517,7 +565,9 @@ export function Globe({ axis, origin, antipode, locked, boring, armed, onBoreCom
             s.onBoreComplete?.();
           }
         } else {
-          const el = now - s.boreStart;
+          // While the visitor holds the planet the bore waits — `pauseT`
+          // stands in for `now` until release shifts the clock forward.
+          const el = (s.pauseT || now) - s.boreStart;
           const open = easeInOut(clamp01((el - BORE_T.openAt) / BORE_T.openDur));
           if (!s.resealing) {
             s.morphT = open;
@@ -526,9 +576,12 @@ export function Globe({ axis, origin, antipode, locked, boring, armed, onBoreCom
             // planet must register as a place, not the fastest stretch.
             // The gaussian pull stays monotonic and preserves endpoints.
             const t = easeInOut(pt);
-            const wgt = Math.exp(-Math.pow((pt - 0.5) / 0.22, 2));
-            s.probeT = t - (t - 0.5) * 0.68 * wgt;
-            if (pt >= 1) s.probeT = 1;
+            const wgt = Math.exp(-Math.pow((pt - 0.5) / 0.28, 2));
+            s.probeT = t - (t - 0.5) * 0.75 * wgt;
+            if (pt >= 1) {
+              s.probeT = 1;
+              if (!s.exitAt) s.exitAt = now; // bone-white exit flare
+            }
             // Rest at the far rim until the resolver answers.
             if (pt >= 1 && s.armed) {
               if (!s.holdStart) s.holdStart = now;
@@ -616,7 +669,7 @@ export function Globe({ axis, origin, antipode, locked, boring, armed, onBoreCom
         // that stays legible over the exposed section until it reseals.
         const openSplit = Math.min(1, morph / 0.3);
         const dissolve = 1 - clamp01((morph - 0.62) / 0.33);
-        const splitPx = Math.min(openSplit, dissolve) * 16;
+        const splitPx = Math.min(openSplit, dissolve) * R * 0.12;
         const halves: readonly (readonly [number, number, number])[] =
           splitPx > 0.4
             ? [[-splitPx, 0, cx + 1], [splitPx, cx - 1, w]]
@@ -630,7 +683,7 @@ export function Globe({ axis, origin, antipode, locked, boring, armed, onBoreCom
             ctx.translate(dx, 0);
           }
           const ghost =
-            s.boring && !s.boreDone && morph > 0.9 ? 0.12 : 0;
+            s.boring && !s.boreDone && morph > 0.9 ? 0.25 : 0;
           ctx.globalAlpha = Math.max(wireA, splitPx > 0.4 ? 0.3 : 0, ghost);
           for (const ring of GRATICULE) {
             strokeRing(ring, false, false, "rgba(242,238,227,0.045)", 0.6);
@@ -657,6 +710,7 @@ export function Globe({ axis, origin, antipode, locked, boring, armed, onBoreCom
           beamAlpha: 1,
           flashes: reduced ? [] : s.flashes,
           t: now / 1000,
+          exitFlash: s.exitAt ? clamp01((now - s.exitAt) / 120) : -1,
         });
         ctx.restore();
       }
@@ -743,6 +797,32 @@ export function Globe({ axis, origin, antipode, locked, boring, armed, onBoreCom
           ctx.lineTo(pa.x, pa.y);
           ctx.stroke();
           ctx.restore();
+          // One pulse rides the chord when playback locks — the signal
+          // made it through. Fires once per lock, then the marker's own
+          // breathing takes over.
+          if (s.locked && !s.pulseSent) {
+            s.pulseSent = true;
+            s.flashes.push({ t: -1, at: now / 1000 }); // t=-1: chord pulse slot
+          }
+          if (s.locked || s.pulseSent) {
+            const pulse = s.flashes.find((f) => f.t === -1);
+            if (pulse) {
+              const age = now / 1000 - pulse.at;
+              if (age < 0.9) {
+                const k = easeInOut(age / 0.9);
+                const px = po.x + (pa.x - po.x) * k;
+                const py = po.y + (pa.y - po.y) * k;
+                const g = ctx.createRadialGradient(px, py, 0, px, py, 9);
+                g.addColorStop(0, "rgba(255,240,222,0.95)");
+                g.addColorStop(0.4, "rgba(255,122,40,0.75)");
+                g.addColorStop(1, "rgba(255,77,0,0)");
+                ctx.beginPath();
+                ctx.arc(px, py, 9, 0, Math.PI * 2);
+                ctx.fillStyle = g;
+                ctx.fill();
+              }
+            }
+          }
           drawMarker(s.origin, "origin");
           drawMarker(s.antipode, "anti");
         } else {
@@ -774,28 +854,21 @@ export function Globe({ axis, origin, antipode, locked, boring, armed, onBoreCom
         }
       }
 
-      // Depth counter under the disc while boring — depth below the
-      // nearest surface, so it falls back to 0 as the probe emerges.
+      // Progress counter under the disc while boring — distance crossed
+      // is the headline (a whole planet is the claim); depth below the
+      // nearest surface rides underneath, falling back to 0 on exit.
       if (s.boring && s.probeT >= 0 && morph > 0.5) {
+        const crossed = Math.round(s.probeT * DIAMETER_KM).toLocaleString("en-US");
         const d = Math.min(s.probeT, 1 - s.probeT);
         const depth = Math.round(d * DIAMETER_KM).toLocaleString("en-US");
-        const parts: [string, string][] = [
-          ["depth ", "rgba(152,161,184,0.9)"],
-          [`${depth} km`, "rgba(242,238,227,0.95)"],
-          [` · ${layerAt(s.probeT)}`, "rgba(152,161,184,0.9)"],
-        ];
-        ctx.font = "11px 'IBM Plex Mono', monospace";
-        ctx.textAlign = "left";
-        const totalW = parts.reduce((acc, [txt]) => acc + ctx.measureText(txt).width, 0);
-        let x0 = cx - totalW / 2;
-        // On small windows the disc nearly fills the canvas — clamp the
-        // readout inside the bottom edge instead of clipping it.
+        ctx.textAlign = "center";
         const textY = Math.min(cy + R + 26, h - 8);
-        for (const [txt, color] of parts) {
-          ctx.fillStyle = color;
-          ctx.fillText(txt, x0, textY);
-          x0 += ctx.measureText(txt).width;
-        }
+        ctx.font = "13px 'IBM Plex Mono', monospace";
+        ctx.fillStyle = "rgba(242,238,227,0.95)";
+        ctx.fillText(`${crossed} / ${DIAMETER_KM.toLocaleString("en-US")} km`, cx, textY - 14);
+        ctx.font = "11px 'IBM Plex Mono', monospace";
+        ctx.fillStyle = "rgba(152,161,184,0.9)";
+        ctx.fillText(`depth ${depth} km · ${layerAt(s.probeT)}`, cx, textY + 2);
       }
 
       // In reduced-motion mode, draw once per change then idle. The armed

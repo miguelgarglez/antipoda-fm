@@ -77,7 +77,7 @@ await page.mouse.wheel(0, 600);
 await page.waitForTimeout(700);
 
 // --- Madrid tune: catch the bore mid-flight ---
-await page.click('button.chip:has-text("Madrid")');
+await page.click('button.place-link:has-text("Madrid")');
 for (const ms of [400, 800, 1200]) {
   await page.waitForTimeout(400);
   await page.screenshot({ path: `${OUT}/03-bore-${ms}ms.png` });
@@ -106,7 +106,7 @@ console.log("guide dismissed after dial drag:", guideGone);
 await page.screenshot({ path: `${OUT}/05-dial-next.png` });
 
 // --- copy link ---
-await page.click('button:has-text("COPY LINK")').catch(() => null);
+await page.click('button.icon-btn').catch(() => null);
 await page.waitForTimeout(300);
 const clipboardOK = await page.evaluate(
   () => navigator.clipboard.readText().catch(() => "denied"),
@@ -114,21 +114,21 @@ const clipboardOK = await page.evaluate(
 console.log("clipboard:", clipboardOK);
 
 // --- pause / resume ---
-await page.click('button:has-text("PAUSE")');
+await page.click('button.play-btn');
 await page.waitForTimeout(400);
-const resumeVisible = await page.locator('button:has-text("LISTEN")').count();
+const resumeVisible = await page.locator('button.play-btn[aria-label="Listen"]').count();
 await page.screenshot({ path: `${OUT}/06-paused.png` });
 console.log("resume button:", resumeVisible);
-await page.click('button:has-text("LISTEN")').catch(() => null);
+await page.click('button.play-btn[aria-label="Listen"]').catch(() => null);
 await page.waitForTimeout(1200);
 
 // --- elsewhere: back to idle ---
-await page.click('button:has-text("ELSEWHERE")');
+await page.click('button.link-btn');
 await page.waitForTimeout(800);
 await page.screenshot({ path: `${OUT}/07-back-idle.png` });
 
 // --- ocean antipode: Denver -> Indian Ocean ---
-await page.click('button.chip:has-text("Denver")').catch(async () => {
+await page.click('button.place-link:has-text("Denver")').catch(async () => {
   await page.fill("#place", "Denver");
   await page.waitForSelector(".place-list li button", { timeout: 15000 });
   await page.click(".place-list li button");
@@ -153,7 +153,7 @@ await mp.waitForTimeout(1500);
 await mp.screenshot({ path: `${OUT}/09-idle-375.png` });
 const hscroll = await mp.evaluate(() => document.documentElement.scrollWidth);
 console.log("mobile scrollWidth:", hscroll);
-await mp.click('button.chip:has-text("Madrid")');
+await mp.click('button.place-link:has-text("Madrid")');
 await mp.waitForTimeout(700);
 await mp.screenshot({ path: `${OUT}/10-bore-375.png` });
 await mp.waitForSelector(".station-name", { timeout: 30000 });
@@ -178,7 +178,7 @@ const rp = await rctx.newPage();
 rp.on("pageerror", (e) => errors.push(`[rm pageerror] ${e.message}`));
 await rp.goto(URL, { waitUntil: "domcontentloaded" });
 await rp.waitForTimeout(1200);
-await rp.click('button.chip:has-text("Madrid")');
+await rp.click('button.place-link:has-text("Madrid")');
 await rp.waitForTimeout(2500);
 await rp.screenshot({ path: `${OUT}/12-reduced-tuned.png` });
 await rctx.close();
