@@ -478,11 +478,17 @@ export default function App() {
             armed={armed}
             onBoreComplete={onBoreComplete}
           />
-          {phase !== "idle" && tune && (
+          {phase !== "idle" && (
             <div className="dial-caption" aria-hidden="true">
-              <span className="dial-you">you · {tune.origin.label ?? formatCoord(tune.origin)}</span>
+              {/* Mount from the start of tuning — the rows exist before
+                  the resolver answers, so nothing shifts when they fill. */}
+              <span className="dial-you">
+                {tune ? `you · ${tune.origin.label ?? formatCoord(tune.origin)}` : " "}
+              </span>
               <span className="dial-far">
-                {tune.land.country.name || "open ocean"} · {formatCoord(tune.antipode)}
+                {tune
+                  ? `${tune.land.country.name || "open ocean"} · ${formatCoord(tune.antipode)}`
+                  : " "}
               </span>
             </div>
           )}

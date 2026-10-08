@@ -420,10 +420,10 @@ input:focus-visible,
 
 .scope-note {
   font-family: var(--mono);
-  font-size: 9.5px;
-  letter-spacing: 0.12em;
+  font-size: 10.5px;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: rgba(152, 161, 184, 0.72);
+  color: rgba(152, 161, 184, 0.85);
   margin: 4px 0 2px;
   text-align: right;
 }
@@ -730,6 +730,14 @@ input:focus-visible,
     min-height: 44px;
     padding: 10px 16px;
   }
+  /* The meter explanation must be comfortably readable on a phone. */
+  .scope-note {
+    font-size: 12px;
+    text-transform: none;
+    letter-spacing: 0.02em;
+    color: rgba(242, 238, 227, 0.8);
+    text-align: left;
+  }
   .intro h1 {
     font-size: clamp(1.6rem, 7vw, 2.1rem);
   }
@@ -800,7 +808,8 @@ input:focus-visible,
   .btn,
   .chip,
   .snd,
-  .stage {
+  .stage,
+  .stage .globe {
     transition: none;
   }
 }

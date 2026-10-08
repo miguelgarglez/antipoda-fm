@@ -298,9 +298,12 @@ export function Globe({ axis, origin, antipode, locked, boring, armed, onBoreCom
           if (!s.resealing) {
             s.morphT = open;
             const pt = clamp01((el - BORE_T.travelAt) / BORE_T.travelDur);
-            // ease-in-out: entry, core crossing, and emergence each get a
-            // beat instead of one compressed dive.
-            s.probeT = easeInOut(pt);
+            // Ease-in-out with a dwell inside the core — the heart of the
+            // planet must register as a place, not the fastest stretch.
+            // The gaussian pull stays monotonic and preserves endpoints.
+            const t = easeInOut(pt);
+            const wgt = Math.exp(-Math.pow((pt - 0.5) / 0.22, 2));
+            s.probeT = t - (t - 0.5) * 0.68 * wgt;
             if (pt >= 1) s.probeT = 1;
             // Rest at the far rim until the resolver answers.
             if (pt >= 1 && s.armed) {
@@ -520,9 +523,12 @@ export function Globe({ axis, origin, antipode, locked, boring, armed, onBoreCom
         ctx.textAlign = "left";
         const totalW = parts.reduce((acc, [txt]) => acc + ctx.measureText(txt).width, 0);
         let x0 = cx - totalW / 2;
+        // On small windows the disc nearly fills the canvas — clamp the
+        // readout inside the bottom edge instead of clipping it.
+        const textY = Math.min(cy + R + 26, h - 8);
         for (const [txt, color] of parts) {
           ctx.fillStyle = color;
-          ctx.fillText(txt, x0, cy + R + 26);
+          ctx.fillText(txt, x0, textY);
           x0 += ctx.measureText(txt).width;
         }
       }

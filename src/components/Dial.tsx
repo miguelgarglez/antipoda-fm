@@ -40,6 +40,7 @@ export function Dial({ count, index, sweeping, live, onSelect, onMove, onLock, l
     speckle: [] as { x: number; y: number; a: number }[],
     magIx: -1, // detent the needle is magnetically snapped to while dragging
     pid: null as number | null, // the one pointer owning the drag
+    clickBurst: 0, // staggered detent clicks queued this gesture
     lastT: 0, // frame clock for dt-normalized physics
     live,
   });
@@ -120,10 +121,12 @@ export function Dial({ count, index, sweeping, live, onSelect, onMove, onLock, l
       s.v = 0;
       s.x += (target - s.x) * Math.min(1, (s.sweeping ? 0.06 : 0.5) * dt);
     } else {
-      // Damped spring — glide with a hair of overshoot, time-normalized.
+      // Damped spring — glide with a hair of overshoot. Velocity is in
+      // px-per-frame and the position step scales by dt too, so the same
+      // gesture settles identically at 30/60/120Hz.
       s.v += (target - s.x) * 0.16 * dt;
       s.v *= Math.pow(0.78, dt);
-      s.x += s.v;
+      s.x += s.v * dt;
     }
     const speed = Math.abs(target - s.x) + Math.abs(s.v);
     const wasSettled = s.settled;
@@ -156,11 +159,16 @@ export function Dial({ count, index, sweeping, live, onSelect, onMove, onLock, l
       }
     }
 
-    // Detents.
+    // Detents. Phosphor is earned by audible playback only — a selected
+    // but still-connecting detent stays warm.
     for (let i = 0; i < s.count; i++) {
       const x = detentX(i, w);
       const cur = i === s.index;
-      ctx.strokeStyle = cur ? "rgba(124,255,178,0.75)" : "rgba(242,238,227,0.32)";
+      ctx.strokeStyle = cur
+        ? s.live
+          ? "rgba(124,255,178,0.75)"
+          : "rgba(255,122,40,0.85)"
+        : "rgba(242,238,227,0.32)";
       ctx.lineWidth = cur ? 1.2 : 0.8;
       ctx.beginPath();
       ctx.moveTo(x, top + (cur ? 3 : 7));
@@ -208,10 +216,11 @@ export function Dial({ count, index, sweeping, live, onSelect, onMove, onLock, l
     }
   };
 
-  // React to prop/index changes by waking the loop.
+  // React to prop/index changes by waking the loop — `live` included, or
+  // a settled needle would keep its stale color after play/pause.
   useEffect(() => {
     kick();
-  }, [index, count, sweeping]);
+  }, [index, count, sweeping, live]);
 
   useEffect(() => {
     const canvas = canvasRef.current!;
@@ -237,6 +246,7 @@ export function Dial({ count, index, sweeping, live, onSelect, onMove, onLock, l
     s.dragging = true;
     s.dragX = posFromEvent(e);
     s.lastX = s.dragX;
+    s.clickBurst = 0;
     canvasRef.current!.setPointerCapture(e.pointerId);
     kick();
   };
@@ -261,12 +271,15 @@ export function Dial({ count, index, sweeping, live, onSelect, onMove, onLock, l
       }
     }
     // Fast drags may jump over detents between events — each crossing
-    // still earns its click.
+    // still earns its click, staggered so it reads as a sequence.
     const lo = Math.min(s.lastX, x);
     const hi = Math.max(s.lastX, x);
     for (let i = 0; i < s.count; i++) {
       const dx = detentX(i, s.w);
-      if (dx > lo && dx <= hi && i !== s.magIx) onLock?.();
+      if (dx > lo && dx <= hi && i !== s.magIx && s.clickBurst < 5) {
+        const delay = s.clickBurst++ * 40;
+        setTimeout(() => onLock?.(), delay);
+      }
     }
     s.lastX = x;
     s.dragX = x;
@@ -278,6 +291,7 @@ export function Dial({ count, index, sweeping, live, onSelect, onMove, onLock, l
     s.dragging = false;
     s.pid = null;
     s.magIx = -1;
+    s.clickBurst = 0;
     const i = nearestDetent(s.dragX, s.w);
     if (i !== index) onSelect(i);
     kick();
@@ -289,6 +303,7 @@ export function Dial({ count, index, sweeping, live, onSelect, onMove, onLock, l
     s.dragging = false;
     s.pid = null;
     s.magIx = -1;
+    s.clickBurst = 0;
     kick();
   };
   const onKeyDown = (e: React.KeyboardEvent) => {
